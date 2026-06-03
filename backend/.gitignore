@@ -1,0 +1,95 @@
+# ==============================================================================
+# Aloogaí Backend — .gitignore
+# ==============================================================================
+
+# --- Ambiente Virtual Python ---
+venv/
+.venv/
+env/
+ENV/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+*.whl
+pip-wheel-metadata/
+
+# --- Django ---
+*.log
+db.sqlite3
+db.sqlite3-journal
+staticfiles/
+media/
+*.pot
+*.mo
+
+# --- Variáveis de Ambiente ---
+.env
+.env.local
+.env.production
+.env.staging
+
+# --- Arquivos Temporários (gemini.md: sempre em .tmp/) ---
+.tmp/
+tmp/
+*.tmp
+
+# --- IDE / Editores ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# --- Sistema Operacional ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# --- Coverage & Testes ---
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.pytest_cache/
+.tox/
+nosetests.xml
+
+# --- Celery ---
+celerybeat-schedule
+celerybeat.pid
+
+# --- Docker ---
+docker-compose.override.yml
+
+# --- Distribuição ---
+*.tar.gz
+*.zip
+
+# --- Jupyter Notebook ---
+.ipynb_checkpoints/
+
+# --- mypy ---
+.mypy_cache/
+dmypy.json
+dmypy.txt
+
+# --- Ruff / flake8 ---
+.ruff_cache/
+
+# --- Node (caso tenha ferramentas JS) ---
+node_modules/
+package-lock.json
+yarn.lock

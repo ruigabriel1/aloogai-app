@@ -1,0 +1,12 @@
+# ==============================================================================
+# Aloogaí Backend — Dependências de Produção
+# ==============================================================================
+
+-r base.txt
+
+# --- Monitoramento & Observabilidade ---
+sentry-sdk[django]>=2.13,<3.0
+
+# --- Saúde & Infraestrutura ---
+django-health-check>=3.18,<4.0
+whitenoise>=6.7,<7.0

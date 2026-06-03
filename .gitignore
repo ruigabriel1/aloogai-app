@@ -1,0 +1,36 @@
+# Root Gitignore
+
+# Node
+node_modules/
+.npm/
+
+# Python / Django
+venv/
+env/
+__pycache__/
+*.pyc
+db.sqlite3
+.pytest_cache/
+
+# Expo / React Native
+.expo/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Env vars
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# IDEs and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+.tmp/
