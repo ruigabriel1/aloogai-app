@@ -132,12 +132,21 @@ class ItemViewSet(viewsets.ModelViewSet):
         # Ponto de referência (SRID 4326 / WGS84)
         ponto_ref = Point(lng, lat, srid=4326)
 
-        # Busca por raio usando ST_DWithin + índice GiST
-        queryset = self.get_queryset().filter(
-            localizacao__dwithin=(ponto_ref, D(km=raio_km)),
-        ).annotate(
-            distancia=Distance('localizacao', ponto_ref),
-        )
+        try:
+            # Busca por raio usando ST_DWithin + índice GiST (Falha no SQLite local)
+            from django.core.exceptions import FieldError
+            queryset = self.get_queryset().filter(
+                localizacao__dwithin=(ponto_ref, D(km=raio_km)),
+            ).annotate(
+                distancia=Distance('localizacao', ponto_ref),
+            )
+        except FieldError:
+            # Fallback para SQLite local (Dev): Retorna todos os itens
+            # e anota uma distância simulada de 1km para não quebrar a UI
+            from django.db.models import Value, FloatField
+            queryset = self.get_queryset().annotate(
+                distancia=Value(1.0, output_field=FloatField())
+            )
 
         # Aplicar filtros do django-filter
         queryset = self.filter_queryset(queryset)
