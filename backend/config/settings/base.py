@@ -369,8 +369,11 @@ ALOOGAI_TAXA_SUCESSO_LOCADOR = env.float(
 )
 
 # ==============================================================================
-# Logging
+# Logging Local (Arquivos e Console)
 # ==============================================================================
+# Garante que a pasta logs/ exista localmente
+LOGS_DIR = BASE_DIR / "logs"
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 LOGGING = {
     "version": 1,
@@ -399,6 +402,24 @@ LOGGING = {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
         },
+        "file_app": {
+            "level": "DEBUG",
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": LOGS_DIR / "aloogai_app.log",
+            "maxBytes": 1024 * 1024 * 10,  # 10 MB
+            "backupCount": 5,
+            "formatter": "verbose",
+            "encoding": "utf-8",
+        },
+        "file_django": {
+            "level": "ERROR",
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": LOGS_DIR / "django_errors.log",
+            "maxBytes": 1024 * 1024 * 10,  # 10 MB
+            "backupCount": 5,
+            "formatter": "verbose",
+            "encoding": "utf-8",
+        },
         "mail_admins": {
             "level": "ERROR",
             "filters": ["require_debug_false"],
@@ -406,25 +427,26 @@ LOGGING = {
         },
     },
     "root": {
-        "handlers": ["console"],
+        "handlers": ["console", "file_app"],
         "level": "INFO",
     },
     "loggers": {
         "django": {
-            "handlers": ["console"],
+            "handlers": ["console", "file_django"],
             "level": "INFO",
             "propagate": False,
         },
         "django.request": {
-            "handlers": ["console", "mail_admins"],
+            "handlers": ["console", "file_django", "mail_admins"],
             "level": "ERROR",
             "propagate": False,
         },
         "apps": {
-            "handlers": ["console"],
+            "handlers": ["console", "file_app"],
             "level": "DEBUG",
             "propagate": False,
         },
     },
 }
+
 AUTHENTICATION_BACKENDS = ['apps.users.backends.EmailBackend', 'django.contrib.auth.backends.ModelBackend']

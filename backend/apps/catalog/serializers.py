@@ -102,7 +102,12 @@ class ItemListSerializer(GeoFeatureModelSerializer):
         o campo 'distancia' via ST_DWithin/Distance.
         """
         if hasattr(obj, 'distancia'):
-            return round(obj.distancia.km, 2)
+            # Em PostGIS real, obj.distancia é um objeto Distance com .km
+            if hasattr(obj.distancia, 'km'):
+                return round(obj.distancia.km, 2)
+            # Em SQLite (geo_compat), obj.distancia já é um número (float)
+            elif isinstance(obj.distancia, (float, int)):
+                return round(float(obj.distancia), 2)
         return None
 
 
