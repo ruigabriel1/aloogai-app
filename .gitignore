@@ -34,3 +34,7 @@ db.sqlite3
 Thumbs.db
 *.swp
 .tmp/
+
+# Arquivos pessoais (fora do repositório)
+gemini.md
+DOSSIE_aloogai_oficial_2026.pdf
