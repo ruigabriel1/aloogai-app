@@ -1,13 +1,6 @@
 from rest_framework import serializers
 
-from apps.core.geo_compat import HAS_GIS
-
-if HAS_GIS:
-    from rest_framework_gis.serializers import GeoFeatureModelSerializer
-else:
-    # Fallback: usar ModelSerializer quando GIS não disponível
-    GeoFeatureModelSerializer = serializers.ModelSerializer
-
+from apps.core.geo_compat import coordenadas
 from apps.catalog.models import Avaliacao, Categoria, FotoItem, Item
 from apps.users.serializers import UsuarioResumoSerializer
 
@@ -60,45 +53,67 @@ class FotoItemSerializer(serializers.ModelSerializer):
         return item
 
 
-class ItemListSerializer(GeoFeatureModelSerializer):
+class CoordenadasMixin(serializers.Serializer):
+    """Expõe a localização como latitude/longitude, com ou sem PostGIS."""
+
+    latitude = serializers.SerializerMethodField()
+    longitude = serializers.SerializerMethodField()
+
+    def get_latitude(self, obj: Item) -> float | None:
+        return coordenadas(obj.localizacao)[0]
+
+    def get_longitude(self, obj: Item) -> float | None:
+        return coordenadas(obj.localizacao)[1]
+
+
+def url_foto_capa(obj: Item, request) -> str | None:
+    """URL absoluta da foto de capa (ou da primeira foto, se nenhuma for capa)."""
+    fotos = list(obj.fotos.all())  # usa o prefetch da view
+    foto = next((f for f in fotos if f.is_capa), None) or (fotos[0] if fotos else None)
+    if not foto or not foto.imagem:
+        return None
+    return request.build_absolute_uri(foto.imagem.url) if request else foto.imagem.url
+
+
+class ItemListSerializer(CoordenadasMixin, serializers.ModelSerializer):
     """
-    Serializer GeoJSON para listagem de itens no mapa.
+    Item resumido para o feed e o mapa.
 
-    Retorna itens no formato GeoJSON Feature conforme
-    especificado em gemini.md §3.2 (Saída: Item no Mapa).
-
-    Inclui dados resumidos do locador e foto de capa.
+    JSON comum (não GeoJSON), igual com e sem PostGIS, para o app ler um formato só.
     """
 
     locador = UsuarioResumoSerializer(read_only=True)
+    categoria_nome = serializers.CharField(source='categoria.nome', read_only=True)
+    categoria_icone = serializers.CharField(source='categoria.icone', read_only=True)
     foto_capa_url = serializers.SerializerMethodField()
     distancia_km = serializers.SerializerMethodField()
 
     class Meta:
         model = Item
-        geo_field = 'localizacao'
         fields = [
             'id',
             'titulo',
+            'descricao',
             'camada',
+            'status',
+            'aprovado_para_uso',
+            'categoria',
+            'categoria_nome',
+            'categoria_icone',
             'preco_diaria',
             'valor_caucao',
             'is_destacado',
             'avaliacao_media',
+            'total_avaliacoes',
             'foto_capa_url',
             'distancia_km',
+            'latitude',
+            'longitude',
             'locador',
         ]
 
     def get_foto_capa_url(self, obj: Item) -> str | None:
-        """Retorna URL da foto de capa do item."""
-        foto_capa = obj.fotos.filter(is_capa=True).first()
-        if foto_capa and foto_capa.imagem:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(foto_capa.imagem.url)
-            return foto_capa.imagem.url
-        return None
+        return url_foto_capa(obj, self.context.get('request'))
 
     def get_distancia_km(self, obj: Item) -> float | None:
         """
@@ -117,7 +132,7 @@ class ItemListSerializer(GeoFeatureModelSerializer):
         return None
 
 
-class ItemDetailSerializer(serializers.ModelSerializer):
+class ItemDetailSerializer(CoordenadasMixin, serializers.ModelSerializer):
     """
     Serializer detalhado para página do item.
 
@@ -127,6 +142,7 @@ class ItemDetailSerializer(serializers.ModelSerializer):
 
     locador = UsuarioResumoSerializer(read_only=True)
     fotos = FotoItemSerializer(many=True, read_only=True)
+    foto_capa_url = serializers.SerializerMethodField()
     categoria_nome = serializers.CharField(
         source='categoria.nome',
         read_only=True,
@@ -143,7 +159,9 @@ class ItemDetailSerializer(serializers.ModelSerializer):
             'status',
             'preco_diaria',
             'valor_caucao',
-            'localizacao',
+            'latitude',
+            'longitude',
+            'foto_capa_url',
             'endereco_texto',
             'requer_licenca',
             'aprovado_para_uso',
@@ -169,6 +187,9 @@ class ItemDetailSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
+
+    def get_foto_capa_url(self, obj: Item) -> str | None:
+        return url_foto_capa(obj, self.context.get('request'))
 
 
 class ItemCreateUpdateSerializer(serializers.ModelSerializer):

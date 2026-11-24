@@ -136,6 +136,12 @@ class LocacaoListSerializer(serializers.ModelSerializer):
         source="get_status_display",
         read_only=True,
     )
+    locatario_nome = serializers.CharField(
+        source="locatario.get_full_name",
+        read_only=True,
+    )
+    item_foto_url = serializers.SerializerMethodField()
+    papel = serializers.SerializerMethodField()
 
     class Meta:
         model = Locacao
@@ -143,15 +149,30 @@ class LocacaoListSerializer(serializers.ModelSerializer):
             "id",
             "item",
             "item_titulo",
+            "item_foto_url",
             "locador_nome",
+            "locatario_nome",
+            "papel",
             "status",
             "status_display",
             "data_inicio",
             "data_fim",
+            "numero_diarias",
             "total_locatario",
             "created_at",
         ]
         read_only_fields = fields
+
+    def get_item_foto_url(self, obj: Locacao) -> str | None:
+        from apps.catalog.serializers import url_foto_capa
+
+        return url_foto_capa(obj.item, self.context.get("request"))
+
+    def get_papel(self, obj: Locacao) -> str:
+        """'locador' ou 'locatario', do ponto de vista de quem pediu a lista."""
+        request = self.context.get("request")
+        usuario_id = getattr(getattr(request, "user", None), "id", None)
+        return "locador" if obj.item.locador_id == usuario_id else "locatario"
 
 
 class LocacaoDetailSerializer(serializers.ModelSerializer):

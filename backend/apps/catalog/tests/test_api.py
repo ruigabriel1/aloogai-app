@@ -148,3 +148,31 @@ class AvaliacaoTests(APITestCase):
         resposta = self.client.delete(f'{AVALIACOES}{avaliacao.id}/')
         self.assertEqual(resposta.status_code, 403)
         self.assertTrue(Avaliacao.objects.filter(id=avaliacao.id).exists())
+
+
+class ProximosTests(APITestCase):
+    """Busca por raio (no SQLite do dev, a distância é calculada em Python)."""
+
+    def setUp(self):
+        self.perto = ItemFactory(localizacao='POINT (-48.548 -27.596)')  # Florianópolis, centro
+        self.longe = ItemFactory(localizacao='POINT (-46.633 -23.550)')  # São Paulo
+
+    def test_so_traz_itens_dentro_do_raio_com_formato_plano(self):
+        resposta = self.client.get(f'{ITENS}proximos/', {'lat': -27.59, 'lng': -48.55, 'raio_km': 10})
+        self.assertEqual(resposta.status_code, 200)
+        self.assertEqual(resposta.data['count'], 1)
+        item = resposta.data['results'][0]
+        self.assertEqual(item['id'], str(self.perto.id))
+        self.assertAlmostEqual(item['latitude'], -27.596, places=3)
+        self.assertAlmostEqual(item['longitude'], -48.548, places=3)
+        self.assertLess(item['distancia_km'], 2)
+        self.assertIn('nome', item['locador'])
+
+    def test_raio_grande_traz_os_dois_ordenados_por_distancia(self):
+        resposta = self.client.get(f'{ITENS}proximos/', {'lat': -27.59, 'lng': -48.55, 'raio_km': 1000})
+        ids = [i['id'] for i in resposta.data['results']]
+        self.assertEqual(ids, [str(self.perto.id), str(self.longe.id)])
+
+    def test_sem_lat_lng_retorna_400(self):
+        resposta = self.client.get(f'{ITENS}proximos/')
+        self.assertEqual(resposta.status_code, 400)

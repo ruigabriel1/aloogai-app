@@ -9,7 +9,8 @@ import { BrandColors } from '../../theme/colors';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { criarItem, buscarCategorias } from '../../api/catalog';
+import { criarItem, buscarCategorias, enviarFotoItem } from '../../api/catalog';
+import { mensagemDeErro } from '../../api/auth';
 import { useLocation } from '../../hooks/useLocation';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -34,20 +35,22 @@ export function CreateItemScreen(): React.JSX.Element {
 
   const mutation = useMutation({
     mutationFn: async () => {
-      // Conversões simples
-      const data = {
+      // 1) Cria o item (JSON). Ele nasce ATIVO e já aparece no feed e no mapa.
+      const item = await criarItem({
         titulo,
         descricao,
+        categoria: categoriaId,
         preco_diaria: precoDiaria.replace(',', '.'),
         valor_caucao: valorCaucao.replace(',', '.'),
-        camada: 'ESSENTIAL', // Default para o MVP
-        latitude: latitude || -23.5505, // fallback
-        longitude: longitude || -46.6333,
-        ...(categoriaId ? { categoria: categoriaId } : {}),
-      };
-      // O envio da foto precisaria de FormData para a API, mas para o MVP
-      // criamos a casca visual perfeita.
-      return criarItem(data as any);
+        camada: 'ESSENTIAL',
+        latitude,
+        longitude,
+      });
+      // 2) Envia a foto (multipart) vinculada ao item recém-criado.
+      if (fotoUri) {
+        await enviarFotoItem(item.id, fotoUri, true);
+      }
+      return item;
     },
     onSuccess: () => {
       Alert.alert('Sucesso', 'Item publicado com sucesso!');
@@ -55,9 +58,11 @@ export function CreateItemScreen(): React.JSX.Element {
       queryClient.invalidateQueries({ queryKey: ['meus-itens'] });
       navigation.goBack();
     },
-    onError: (error: any) => {
-      console.error(error);
-      Alert.alert('Erro', 'Não foi possível publicar o item. Verifique os dados e tente novamente.');
+    onError: (error: unknown) => {
+      Alert.alert(
+        'Erro',
+        mensagemDeErro(error, 'Não foi possível publicar o item. Verifique os dados e tente novamente.'),
+      );
     },
   });
 
@@ -70,7 +75,7 @@ export function CreateItemScreen(): React.JSX.Element {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [4, 3],
       quality: 0.8,

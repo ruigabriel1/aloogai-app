@@ -127,9 +127,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         try:
             data = json.loads(text_data)
         except json.JSONDecodeError:
-            await self.send(text_data=json.dumps({
-                "erro": "Formato JSON inválido.",
-            }))
+            await self._enviar("erro", erro="Formato JSON inválido.")
             return
 
         acao = data.get("acao", "mensagem")
@@ -141,9 +139,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         elif acao == "mensagem":
             await self._handle_mensagem(data)
         else:
-            await self.send(text_data=json.dumps({
-                "erro": f"Ação desconhecida: {acao}",
-            }))
+            await self._enviar("erro", erro=f"Ação desconhecida: {acao}")
 
     async def _handle_mensagem(self, data):
         """Processa envio de mensagem de chat."""
@@ -151,24 +147,18 @@ class ChatConsumer(AsyncWebsocketConsumer):
         tipo = data.get("tipo", "TEXTO")
 
         if not conteudo:
-            await self.send(text_data=json.dumps({
-                "erro": "Conteúdo da mensagem não pode ser vazio.",
-            }))
+            await self._enviar("erro", erro="Conteúdo da mensagem não pode ser vazio.")
             return
 
         if tipo not in ("TEXTO", "IMAGEM", "SISTEMA"):
-            await self.send(text_data=json.dumps({
-                "erro": f"Tipo de mensagem inválido: {tipo}",
-            }))
+            await self._enviar("erro", erro=f"Tipo de mensagem inválido: {tipo}")
             return
 
         # Salvar mensagem no banco de dados
         mensagem = await self._salvar_mensagem(conteudo, tipo)
 
         if mensagem is None:
-            await self.send(text_data=json.dumps({
-                "erro": "Erro ao salvar mensagem. Chat pode estar desabilitado.",
-            }))
+            await self._enviar("erro", erro="Erro ao salvar mensagem. Chat pode estar desabilitado.")
             return
 
         # Broadcast para todos os membros do grupo
@@ -178,10 +168,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 "type": "chat_message",
                 "mensagem": {
                     "id": str(mensagem.id),
-                    "sala_id": self.sala_id,
-                    "remetente_id": str(self.user.id),
-                    "conteudo": conteudo,  # Enviar texto limpo pelo WS
+                    "sala": self.sala_id,
+                    "remetente": str(self.user.id),
+                    "conteudo": conteudo,  # texto limpo (no banco fica cifrado)
                     "tipo": tipo,
+                    "lida_em": None,
                     "created_at": mensagem.created_at.isoformat(),
                 },
             },
@@ -204,10 +195,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
     async def _handle_marcar_lida(self):
         """Marca todas as mensagens não lidas como lidas para o usuário."""
         total = await self._marcar_mensagens_lidas()
-        await self.send(text_data=json.dumps({
-            "acao": "lidas_atualizadas",
-            "total": total,
-        }))
+        await self._enviar("lidas_atualizadas", total=total)
 
     async def chat_message(self, event):
         """
@@ -218,10 +206,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         Args:
             event: Dicionário com os dados da mensagem.
         """
-        await self.send(text_data=json.dumps(
-            event["mensagem"],
-            ensure_ascii=False,
-        ))
+        await self._enviar("mensagem", mensagem=event["mensagem"])
 
     async def chat_digitando(self, event):
         """
@@ -230,11 +215,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
         Só envia para o outro participante (não para quem está digitando).
         """
         if event["usuario_id"] != str(self.user.id):
-            await self.send(text_data=json.dumps({
-                "acao": "digitando",
-                "usuario_id": event["usuario_id"],
-            }))
+            await self._enviar("digitando", usuario_id=event["usuario_id"])
 
+
+    async def _enviar(self, evento, **dados):
+        """
+        Envia um evento ao cliente. Todo evento tem o formato
+        {"evento": "mensagem" | "digitando" | "lidas_atualizadas" | "erro", ...}.
+        """
+        await self.send(text_data=json.dumps({"evento": evento, **dados}, ensure_ascii=False))
 
     # =========================================================================
     # Métodos auxiliares (acesso ao banco via database_sync_to_async)

@@ -56,13 +56,23 @@ export function ItemDetailScreen(): React.JSX.Element {
     });
   };
 
-  const fotoCapa = item.fotos?.find(f => f.is_capa) || item.fotos?.[0];
-  const urlCapa = fotoCapa?.url || 'https://via.placeholder.com/400x300.png?text=Sem+Foto';
+  const urlCapa = item.foto_capa_url;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Image source={{ uri: urlCapa }} style={styles.image} />
+        {urlCapa ? (
+          <Image source={{ uri: urlCapa }} style={styles.image} />
+        ) : (
+          <View
+            style={[
+              styles.image,
+              { alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceVariant },
+            ]}
+          >
+            <Text style={{ fontSize: 48 }}>📦</Text>
+          </View>
+        )}
 
         <View style={styles.content}>
           <Text style={[styles.title, { color: colors.text }]}>{item.titulo}</Text>

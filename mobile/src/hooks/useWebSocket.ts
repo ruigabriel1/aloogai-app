@@ -1,269 +1,172 @@
 /**
- * Hook de WebSocket do Aloogaí
+ * useWebSocket — Chat em tempo real do Aloogaí
  *
- * Gerencia conexão WebSocket para chat em tempo real.
- * URL: ws://10.0.2.2:8000/ws/chat/{locacaoId}/?token={jwt}
+ * Conecta em ws(s)://<API>/ws/chat/<locacao_id>/?token=<access JWT>.
  *
- * Features:
- * - Reconexão automática com backoff exponencial
- * - Handlers: mensagem, digitando, lidas_atualizadas
- * - Estados: conectado, reconectando, desconectado
+ * Protocolo (backend/apps/chat/consumers.py):
+ *   cliente → servidor: {"acao": "mensagem", "conteudo": "..."} | {"acao": "digitando"} | {"acao": "marcar_lida"}
+ *   servidor → cliente: {"evento": "mensagem", "mensagem": Mensagem}
+ *                       {"evento": "digitando", "usuario_id": "..."}
+ *                       {"evento": "lidas_atualizadas", "total": n}
+ *                       {"evento": "erro", "erro": "..."}
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../store/authStore';
-import type { Mensagem, Participante } from '../api/chat';
+import { WS_URL } from '../config';
+import type { Mensagem } from '../api/chat';
 
-/** URL base do WebSocket (10.0.2.2 = localhost no emulador Android) */
-const WS_BASE_URL = 'ws://10.0.2.2:8000/ws/chat';
+/** Códigos de fechamento do servidor que não adianta tentar de novo */
+const CODIGOS_DEFINITIVOS = new Set([4001, 4003, 4004]);
+const MAX_TENTATIVAS = 5;
+/** Intervalo mínimo entre dois avisos de "digitando" */
+const INTERVALO_DIGITANDO_MS = 2000;
+/** Quanto tempo o indicador "digitando" fica visível sem novo aviso */
+const DURACAO_DIGITANDO_MS = 3000;
 
-/** Configurações de reconexão */
-const RECONNECT_CONFIG = {
-  /** Delay inicial em ms */
-  initialDelay: 1000,
-  /** Delay máximo em ms */
-  maxDelay: 30000,
-  /** Multiplicador do backoff */
-  multiplier: 2,
-  /** Máximo de tentativas */
-  maxRetries: 10,
-} as const;
+type EventoServidor =
+  | { evento: 'mensagem'; mensagem: Mensagem }
+  | { evento: 'digitando'; usuario_id: string }
+  | { evento: 'lidas_atualizadas'; total: number }
+  | { evento: 'erro'; erro: string };
 
-/** Tipos de mensagem recebida pelo WebSocket */
-type WSMensagemTipo =
-  | 'mensagem'
-  | 'digitando'
-  | 'lidas_atualizadas'
-  | 'erro';
-
-/** Payload recebido do WebSocket */
-interface WSPayload {
-  tipo: WSMensagemTipo;
-  mensagem?: Mensagem;
-  usuario_id?: string;
-  usuario_nome?: string;
-  sala_id?: string;
-  erro?: string;
-}
-
-/** Retorno do hook useWebSocket */
 export interface UseWebSocketReturn {
   /** Se a conexão está ativa */
   conectado: boolean;
   /** Se está tentando reconectar */
   reconectando: boolean;
-  /** Mensagens recebidas em tempo real */
+  /** Mensagem de erro definitiva (ex.: sem permissão), se houver */
+  erro: string | null;
+  /** Mensagens recebidas em tempo real nesta sessão */
   mensagens: Mensagem[];
-  /** Quem está digitando no momento */
-  digitando: Participante | null;
-  /** Envia uma mensagem de texto */
-  enviarMensagem: (conteudo: string) => void;
-  /** Notifica que o usuário está digitando */
+  /** Se a outra pessoa está digitando */
+  digitando: boolean;
+  /** Envia uma mensagem de texto. Devolve false se não estiver conectado. */
+  enviarMensagem: (conteudo: string) => boolean;
+  /** Avisa que o usuário está digitando (limitado a 1 aviso a cada 2 s) */
   enviarDigitando: () => void;
-  /** Limpa as mensagens em tempo real */
-  limparMensagens: () => void;
 }
 
-/**
- * Hook para conexão WebSocket com chat em tempo real.
- *
- * @param locacaoId - ID da locação vinculada à sala de chat
- * @param ativo - Se o WebSocket deve estar ativo (padrão: true)
- *
- * @example
- * ```tsx
- * const { enviarMensagem, mensagens, conectado } = useWebSocket('uuid-locacao');
- * ```
- */
-export function useWebSocket(
-  locacaoId: string | null,
-  ativo: boolean = true,
-): UseWebSocketReturn {
+export function useWebSocket(locacaoId: string, ativo: boolean = true): UseWebSocketReturn {
+  const token = useAuthStore((s) => s.token);
+
   const [conectado, setConectado] = useState(false);
   const [reconectando, setReconectando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
-  const [digitando, setDigitando] = useState<Participante | null>(null);
+  const [digitando, setDigitando] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const retryCountRef = useRef(0);
-  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const digitandoTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tentativasRef = useRef(0);
+  const timerReconexaoRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timerDigitandoRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ultimoDigitandoRef = useRef(0);
+  const encerradoRef = useRef(false);
 
-  /** Calcula o delay com backoff exponencial */
-  const getReconnectDelay = useCallback((): number => {
-    const delay =
-      RECONNECT_CONFIG.initialDelay *
-      Math.pow(RECONNECT_CONFIG.multiplier, retryCountRef.current);
-    return Math.min(delay, RECONNECT_CONFIG.maxDelay);
+  const tratarEvento = useCallback((evento: EventoServidor) => {
+    switch (evento.evento) {
+      case 'mensagem':
+        setMensagens((anteriores) =>
+          anteriores.some((m) => m.id === evento.mensagem.id)
+            ? anteriores
+            : [...anteriores, evento.mensagem],
+        );
+        setDigitando(false);
+        break;
+      case 'digitando':
+        setDigitando(true);
+        if (timerDigitandoRef.current) clearTimeout(timerDigitandoRef.current);
+        timerDigitandoRef.current = setTimeout(() => setDigitando(false), DURACAO_DIGITANDO_MS);
+        break;
+      case 'erro':
+        console.warn('Chat:', evento.erro);
+        break;
+      default:
+        break;
+    }
   }, []);
 
-  /** Fecha a conexão WebSocket */
-  const fecharConexao = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.onclose = null; // Evita reconexão ao fechar manualmente
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    if (retryTimeoutRef.current) {
-      clearTimeout(retryTimeoutRef.current);
-      retryTimeoutRef.current = null;
-    }
-    if (digitandoTimeoutRef.current) {
-      clearTimeout(digitandoTimeoutRef.current);
-      digitandoTimeoutRef.current = null;
-    }
-    setConectado(false);
-    setReconectando(false);
-    setDigitando(null);
-  }, []);
-
-  /** Conecta ao WebSocket */
   const conectar = useCallback(() => {
-    if (!locacaoId || !ativo) return;
+    if (!token || !locacaoId) return;
 
-    const token = useAuthStore.getState().token;
-    if (!token) {
-      console.warn('useWebSocket — sem token JWT para conexão');
-      return;
-    }
-
-    // Fecha conexão anterior se existir
-    if (wsRef.current) {
-      wsRef.current.onclose = null;
-      wsRef.current.close();
-    }
-
-    const url = `${WS_BASE_URL}/${locacaoId}/?token=${token}`;
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(`${WS_URL}/${locacaoId}/?token=${encodeURIComponent(token)}`);
+    wsRef.current = ws;
 
     ws.onopen = () => {
+      tentativasRef.current = 0;
       setConectado(true);
       setReconectando(false);
-      retryCountRef.current = 0;
+      setErro(null);
     };
 
-    ws.onmessage = (event) => {
+    ws.onmessage = (e) => {
       try {
-        const payload = JSON.parse(event.data as string) as WSPayload;
-
-        switch (payload.tipo) {
-          case 'mensagem':
-            if (payload.mensagem) {
-              setMensagens((prev) => [...prev, payload.mensagem!]);
-            }
-            break;
-
-          case 'digitando':
-            if (payload.usuario_id && payload.usuario_nome) {
-              setDigitando({
-                id: payload.usuario_id,
-                nome: payload.usuario_nome,
-              });
-
-              // Limpa o indicador após 3 segundos
-              if (digitandoTimeoutRef.current) {
-                clearTimeout(digitandoTimeoutRef.current);
-              }
-              digitandoTimeoutRef.current = setTimeout(() => {
-                setDigitando(null);
-              }, 3000);
-            }
-            break;
-
-          case 'lidas_atualizadas':
-            // Marca mensagens como lidas
-            setMensagens((prev) =>
-              prev.map((msg) => ({ ...msg, lida: true })),
-            );
-            break;
-
-          case 'erro':
-            console.error('useWebSocket — erro do servidor:', payload.erro);
-            break;
-        }
-      } catch (err) {
-        console.error('useWebSocket — erro ao parsear mensagem:', err);
+        tratarEvento(JSON.parse(String(e.data)) as EventoServidor);
+      } catch {
+        console.warn('Chat: evento inválido recebido');
       }
     };
 
-    ws.onerror = (event) => {
-      console.error('useWebSocket — erro de conexão:', event);
-    };
-
-    ws.onclose = () => {
+    ws.onclose = (e) => {
       setConectado(false);
+      wsRef.current = null;
+      if (encerradoRef.current) return;
 
-      // Reconexão com backoff exponencial
-      if (retryCountRef.current < RECONNECT_CONFIG.maxRetries && ativo) {
-        setReconectando(true);
-        const delay = getReconnectDelay();
-        retryCountRef.current += 1;
-
-        retryTimeoutRef.current = setTimeout(() => {
-          conectar();
-        }, delay);
-      } else {
+      if (CODIGOS_DEFINITIVOS.has(e.code)) {
         setReconectando(false);
-      }
-    };
-
-    wsRef.current = ws;
-  }, [locacaoId, ativo, getReconnectDelay]);
-
-  /** Envia uma mensagem pelo WebSocket */
-  const enviarMensagem = useCallback(
-    (conteudo: string) => {
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-        console.warn('useWebSocket — conexão não está aberta');
+        setErro(
+          e.code === 4003
+            ? 'Você não tem acesso a esta conversa.'
+            : 'Não foi possível entrar na conversa. Faça login novamente.',
+        );
         return;
       }
+      if (tentativasRef.current >= MAX_TENTATIVAS) {
+        setReconectando(false);
+        setErro('Sem conexão com o chat.');
+        return;
+      }
+      // Reconexão com espera crescente: 1 s, 2 s, 4 s, 8 s, 16 s
+      const espera = 1000 * 2 ** tentativasRef.current;
+      tentativasRef.current += 1;
+      setReconectando(true);
+      timerReconexaoRef.current = setTimeout(conectar, espera);
+    };
+  }, [token, locacaoId, tratarEvento]);
 
-      wsRef.current.send(
-        JSON.stringify({
-          tipo: 'mensagem',
-          conteudo,
-        }),
-      );
-    },
-    [],
+  useEffect(() => {
+    if (!ativo) return undefined;
+    encerradoRef.current = false;
+    conectar();
+    return () => {
+      encerradoRef.current = true;
+      if (timerReconexaoRef.current) clearTimeout(timerReconexaoRef.current);
+      if (timerDigitandoRef.current) clearTimeout(timerDigitandoRef.current);
+      wsRef.current?.close();
+      wsRef.current = null;
+    };
+  }, [ativo, conectar]);
+
+  const enviar = useCallback((dados: Record<string, string>): boolean => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(dados));
+    return true;
+  }, []);
+
+  const enviarMensagem = useCallback(
+    (conteudo: string) => enviar({ acao: 'mensagem', conteudo }),
+    [enviar],
   );
 
-  /** Notifica que o usuário está digitando */
   const enviarDigitando = useCallback(() => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    const agora = Date.now();
+    if (agora - ultimoDigitandoRef.current < INTERVALO_DIGITANDO_MS) return;
+    ultimoDigitandoRef.current = agora;
+    enviar({ acao: 'digitando' });
+  }, [enviar]);
 
-    wsRef.current.send(
-      JSON.stringify({
-        tipo: 'digitando',
-      }),
-    );
-  }, []);
-
-  /** Limpa as mensagens em tempo real */
-  const limparMensagens = useCallback(() => {
-    setMensagens([]);
-  }, []);
-
-  // Conecta quando locacaoId ou ativo mudam
-  useEffect(() => {
-    if (ativo && locacaoId) {
-      conectar();
-    }
-
-    return () => {
-      fecharConexao();
-    };
-  }, [locacaoId, ativo, conectar, fecharConexao]);
-
-  return {
-    conectado,
-    reconectando,
-    mensagens,
-    digitando,
-    enviarMensagem,
-    enviarDigitando,
-    limparMensagens,
-  };
+  return { conectado, reconectando, erro, mensagens, digitando, enviarMensagem, enviarDigitando };
 }
 
 export default useWebSocket;

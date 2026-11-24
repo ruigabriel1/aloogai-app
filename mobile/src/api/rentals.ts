@@ -1,16 +1,14 @@
 /**
  * API de Locações do Aloogaí
  *
- * Funções para gerenciar o ciclo de vida das locações:
- * criar, listar, obter detalhes e cancelar.
- * Endpoints: /rentals/
+ * Os tipos espelham backend/apps/rentals/serializers.py.
  */
 
 import { apiClient } from './client';
+import type { Paginado } from './catalog';
 
 // ─── Tipos ──────────────────────────────────────────────
 
-/** Status FSM da locação (transições unidirecionais) */
 export type StatusLocacao =
   | 'SOLICITADO'
   | 'CAUCAO_RETIDA'
@@ -20,127 +18,107 @@ export type StatusLocacao =
   | 'CANCELADO'
   | 'CONTESTADO';
 
-/** Evento na timeline da locação */
-export interface TimelineEvento {
-  status: StatusLocacao;
-  timestamp: string;
-  observacao?: string;
-}
-
-/** Item resumido dentro da locação */
-export interface ItemLocacao {
+/** LocacaoListSerializer */
+export interface LocacaoResumo {
   id: string;
-  titulo: string;
-  foto_capa_url: string;
-  preco_diaria: string;
-  locador: {
-    id: string;
-    nome: string;
-    foto_perfil?: string;
-  };
-}
-
-/** Locação completa */
-export interface Locacao {
-  id: string;
+  item: string;
+  item_titulo: string;
+  item_foto_url: string | null;
+  locador_nome: string;
+  locatario_nome: string;
+  /** Papel de quem está vendo a lista */
+  papel: 'locador' | 'locatario';
   status: StatusLocacao;
-  item: ItemLocacao;
-  locatario: {
-    id: string;
-    nome: string;
-    foto_perfil?: string;
-  };
+  status_display: string;
   data_inicio: string;
   data_fim: string;
+  numero_diarias: number;
+  total_locatario: string;
+  created_at: string;
+}
+
+/** TimelineLocacaoSerializer */
+export interface EventoTimeline {
+  id: string;
+  status_anterior: StatusLocacao | '';
+  status_novo: StatusLocacao;
+  observacao: string;
+  created_at: string;
+}
+
+/** LocacaoDetailSerializer */
+export interface LocacaoDetalhe {
+  id: string;
+  item: string;
+  item_titulo: string;
+  locatario: string;
+  locatario_nome: string;
+  locador_nome: string;
+  status: StatusLocacao;
+  status_display: string;
+  data_inicio: string;
+  data_fim: string;
+  numero_diarias: number;
   valor_diarias: string;
   valor_caucao: string;
-  taxa_servico: string;
-  valor_total: string;
-  payment_intent_id?: string;
-  caucao_auth_id?: string;
-  co2_evitado: number;
-  timeline: TimelineEvento[];
-  sala_chat_id?: string;
-  criado_em: string;
-  atualizado_em: string;
+  valor_taxa_servico: string;
+  valor_taxa_sucesso: string;
+  total_locatario: string;
+  co2_evitado: number | null;
+  timeline: EventoTimeline[];
+  created_at: string;
+  updated_at: string;
 }
 
-/** Payload para criar locação */
+/** Payload de POST rentals/locacoes/ (LocacaoCreateSerializer) */
 export interface CriarLocacaoPayload {
-  item_id: string;
+  item: string;
   data_inicio: string;
   data_fim: string;
-  payment_method_id?: string;
 }
 
-/** Resposta paginada de locações */
-export interface LocacoesResponse {
-  results: Locacao[];
-  count: number;
-  next: string | null;
-  previous: string | null;
+/** Resposta da criação: a locação + dados para a PaymentSheet do Stripe */
+export interface LocacaoCriada extends LocacaoDetalhe {
+  pagamento?: {
+    client_secret: string;
+    payment_intent_id: string;
+  } | null;
 }
 
 // ─── Funções da API ─────────────────────────────────────
 
-/**
- * Cria uma nova solicitação de locação.
- *
- * POST /rentals/locacoes/
- */
-export async function criarLocacao(
-  payload: CriarLocacaoPayload,
-): Promise<Locacao> {
-  const response = await apiClient.post<Locacao>('rentals/locacoes/', payload);
+/** POST rentals/locacoes/ */
+export async function criarLocacao(payload: CriarLocacaoPayload): Promise<LocacaoCriada> {
+  const response = await apiClient.post<LocacaoCriada>('rentals/locacoes/', payload);
   return response.data;
 }
 
-/**
- * Lista as locações do usuário autenticado.
- *
- * GET /rentals/locacoes/
- * @param tipo - 'locatario' ou 'locador' para filtrar por papel
- */
-export async function listarLocacoes(
-  tipo?: 'locatario' | 'locador',
-): Promise<Locacao[]> {
+/** GET rentals/locacoes/?tipo=locatario|locador */
+export async function listarLocacoes(tipo?: 'locatario' | 'locador'): Promise<LocacaoResumo[]> {
   const params: Record<string, string> = {};
   if (tipo) params.tipo = tipo;
-
-  const response = await apiClient.get<LocacoesResponse>('rentals/locacoes/', {
-    params,
-  });
+  const response = await apiClient.get<Paginado<LocacaoResumo>>('rentals/locacoes/', { params });
   return response.data.results;
 }
 
-/**
- * Obtém detalhes de uma locação específica.
- *
- * GET /rentals/locacoes/{id}/
- */
-export async function obterLocacao(id: string): Promise<Locacao> {
-  const response = await apiClient.get<Locacao>(`rentals/locacoes/${id}/`);
+/** GET rentals/locacoes/{id}/ */
+export async function obterLocacao(id: string): Promise<LocacaoDetalhe> {
+  const response = await apiClient.get<LocacaoDetalhe>(`rentals/locacoes/${id}/`);
   return response.data;
 }
 
-/**
- * Cancela uma locação (somente antes de CAUCAO_RETIDA).
- *
- * POST /rentals/locacoes/{id}/cancelar/
- */
-export async function cancelarLocacao(id: string): Promise<Locacao> {
-  const response = await apiClient.post<Locacao>(
-    `rentals/locacoes/${id}/cancelar/`,
-  );
+/** POST rentals/locacoes/{id}/{acao}/ — transições da máquina de estados */
+export type AcaoLocacao =
+  | 'confirmar-entrega'
+  | 'confirmar-devolucao'
+  | 'concluir'
+  | 'cancelar';
+
+export async function executarAcao(id: string, acao: AcaoLocacao): Promise<LocacaoDetalhe> {
+  const response = await apiClient.post<LocacaoDetalhe>(`rentals/locacoes/${id}/${acao}/`);
   return response.data;
 }
 
-/** Re-export por conveniência */
-export const rentalsApi = {
-  criarLocacao,
-  listarLocacoes,
-  obterLocacao,
-  cancelarLocacao,
-};
+export const rentalsApi = { criarLocacao, listarLocacoes, obterLocacao, executarAcao };
 
 export default rentalsApi;

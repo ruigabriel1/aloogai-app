@@ -1,4 +1,4 @@
-from apps.core.geo_compat import HAS_GIS, Point, D
+from apps.core.geo_compat import HAS_GIS, Point, D, coordenadas, distancia_km
 
 if HAS_GIS:
     from django.contrib.gis.db.models.functions import Distance
@@ -137,24 +137,16 @@ class ItemViewSet(viewsets.ModelViewSet):
                 status=400,
             )
 
-        # Ponto de referência (SRID 4326 / WGS84)
-        ponto_ref = Point(lng, lat, srid=4326)
+        if not HAS_GIS:
+            return self._proximos_sem_gis(lat, lng, raio_km, ordenar_por)
 
-        try:
-            # Busca por raio usando ST_DWithin + índice GiST (Falha no SQLite local)
-            from django.core.exceptions import FieldError
-            queryset = self.get_queryset().filter(
-                localizacao__dwithin=(ponto_ref, D(km=raio_km)),
-            ).annotate(
-                distancia=Distance('localizacao', ponto_ref),
-            )
-        except FieldError:
-            # Fallback para SQLite local (Dev): Retorna todos os itens
-            # e anota uma distância simulada de 1km para não quebrar a UI
-            from django.db.models import Value, FloatField
-            queryset = self.get_queryset().annotate(
-                distancia=Value(1.0, output_field=FloatField())
-            )
+        # Ponto de referência (SRID 4326 / WGS84); busca por raio com ST_DWithin + índice GiST
+        ponto_ref = Point(lng, lat, srid=4326)
+        queryset = self.get_queryset().filter(
+            localizacao__dwithin=(ponto_ref, D(km=raio_km)),
+        ).annotate(
+            distancia=Distance('localizacao', ponto_ref),
+        )
 
         # Aplicar filtros do django-filter
         queryset = self.filter_queryset(queryset)
@@ -176,6 +168,33 @@ class ItemViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
+
+    def _proximos_sem_gis(self, lat, lng, raio_km, ordenar_por):
+        """
+        Mesma busca sem PostGIS (dev com SQLite): calcula a distância em Python.
+
+        Serve para poucos itens; em produção a busca roda no banco com ST_DWithin.
+        """
+        itens = []
+        for item in self.filter_queryset(self.get_queryset()):
+            item_lat, item_lng = coordenadas(item.localizacao)
+            if item_lat is None:
+                continue
+            item.distancia = distancia_km(lat, lng, item_lat, item_lng)
+            if item.distancia <= raio_km:
+                itens.append(item)
+
+        chaves = {
+            'distancia': lambda i: (not i.is_destacado, i.distancia),
+            'preco': lambda i: (not i.is_destacado, i.preco_diaria, i.distancia),
+            'avaliacao': lambda i: (not i.is_destacado, -i.avaliacao_media, i.distancia),
+        }
+        itens.sort(key=chaves.get(ordenar_por, chaves['distancia']))
+
+        page = self.paginate_queryset(itens)
+        if page is not None:
+            return self.get_paginated_response(self.get_serializer(page, many=True).data)
+        return Response(self.get_serializer(itens, many=True).data)
 
 
 class FotoItemViewSet(viewsets.ModelViewSet):

@@ -163,16 +163,22 @@ class UsuarioResumoSerializer(serializers.ModelSerializer):
     Expõe apenas dados públicos sem informações sensíveis.
     """
 
+    nome = serializers.SerializerMethodField()
+
     class Meta:
         model = Usuario
         fields = [
             'id',
+            'nome',
             'first_name',
             'foto_perfil',
             'score_esg',
             'tipo_usuario',
         ]
         read_only_fields = fields
+
+    def get_nome(self, obj: Usuario) -> str:
+        return obj.get_full_name() or obj.first_name or obj.username
 
 
 class EnderecoSerializer(serializers.ModelSerializer):

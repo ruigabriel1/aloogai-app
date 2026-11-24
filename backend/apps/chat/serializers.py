@@ -21,6 +21,9 @@ class SalaChatSerializer(serializers.ModelSerializer):
     chat_permitido = serializers.BooleanField(read_only=True)
     total_mensagens = serializers.SerializerMethodField()
     ultima_mensagem = serializers.SerializerMethodField()
+    item_titulo = serializers.CharField(source="locacao.item.titulo", read_only=True)
+    outro_participante = serializers.SerializerMethodField()
+    nao_lidas = serializers.SerializerMethodField()
 
     class Meta:
         model = SalaChat
@@ -29,17 +32,36 @@ class SalaChatSerializer(serializers.ModelSerializer):
             "locacao",
             "locador",
             "locatario",
+            "item_titulo",
+            "outro_participante",
             "ativa",
             "chat_permitido",
             "total_mensagens",
+            "nao_lidas",
             "ultima_mensagem",
             "created_at",
         )
         read_only_fields = fields
 
+    def _usuario(self):
+        request = self.context.get("request")
+        return getattr(request, "user", None)
+
     def get_total_mensagens(self, obj):
         """Retorna o total de mensagens na sala."""
         return obj.mensagens.count()
+
+    def get_outro_participante(self, obj):
+        """A outra pessoa da conversa, do ponto de vista de quem pediu."""
+        usuario = self._usuario()
+        outro = obj.locatario if obj.locador_id == getattr(usuario, "id", None) else obj.locador
+        return {"id": str(outro.id), "nome": outro.get_full_name() or outro.first_name}
+
+    def get_nao_lidas(self, obj):
+        usuario = self._usuario()
+        if not getattr(usuario, "id", None):
+            return 0
+        return obj.mensagens.filter(lida_em__isnull=True).exclude(remetente=usuario).count()
 
     def get_ultima_mensagem(self, obj):
         """Retorna um resumo da última mensagem da sala."""
@@ -48,6 +70,7 @@ class SalaChatSerializer(serializers.ModelSerializer):
             return {
                 "id": str(ultima.id),
                 "remetente": str(ultima.remetente_id),
+                "conteudo": ultima.conteudo,
                 "tipo": ultima.tipo,
                 "created_at": ultima.created_at.isoformat(),
             }
@@ -92,7 +115,8 @@ class MensagemCreateSerializer(serializers.ModelSerializer):
             "conteudo",
             "tipo",
         )
-        read_only_fields = ("id",)
+        # A sala vem da URL (perform_create da view), não do corpo da requisição.
+        read_only_fields = ("id", "sala")
 
     def validate_sala(self, sala):
         """

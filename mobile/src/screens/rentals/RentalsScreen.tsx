@@ -29,7 +29,7 @@ import { useTheme } from '../../theme';
 import { TextStyles, FontFamily, FontSize } from '../../theme/typography';
 import { Spacing, BorderRadius, Shadows } from '../../theme/spacing';
 import { BrandColors } from '../../theme/colors';
-import { listarLocacoes, type Locacao, type StatusLocacao } from '../../api/rentals';
+import { listarLocacoes, type LocacaoResumo, type StatusLocacao } from '../../api/rentals';
 
 /** Mapa de cores por status da locação */
 const STATUS_CONFIG: Record<
@@ -114,7 +114,7 @@ export function RentalsScreen(): React.JSX.Element {
   }, []);
 
   /** Renderiza um card de locação */
-  const renderLocacao = ({ item: locacao }: { item: Locacao }) => {
+  const renderLocacao = ({ item: locacao }: { item: LocacaoResumo }) => {
     const statusConfig = STATUS_CONFIG[locacao.status];
 
     return (
@@ -132,9 +132,9 @@ export function RentalsScreen(): React.JSX.Element {
         <View style={styles.cardConteudo}>
           {/* Foto do item */}
           <View style={styles.cardFotoContainer}>
-            {locacao.item.foto_capa_url ? (
+            {locacao.item_foto_url ? (
               <Image
-                source={{ uri: locacao.item.foto_capa_url }}
+                source={{ uri: locacao.item_foto_url }}
                 style={[
                   styles.cardFoto,
                   { backgroundColor: colors.surfaceVariant },
@@ -160,7 +160,7 @@ export function RentalsScreen(): React.JSX.Element {
               style={[styles.cardTitulo, { color: colors.text }]}
               numberOfLines={2}
             >
-              {locacao.item.titulo}
+              {locacao.item_titulo}
             </Text>
 
             {/* Datas */}
@@ -176,8 +176,8 @@ export function RentalsScreen(): React.JSX.Element {
               numberOfLines={1}
             >
               {tabAtiva === 'locatario'
-                ? `🏠 ${locacao.item.locador.nome}`
-                : `👤 ${locacao.locatario.nome}`}
+                ? `🏠 ${locacao.locador_nome}`
+                : `👤 ${locacao.locatario_nome}`}
             </Text>
 
             {/* Status badge */}
@@ -206,7 +206,7 @@ export function RentalsScreen(): React.JSX.Element {
             Total
           </Text>
           <Text style={[styles.cardValor, { color: BrandColors.primary }]}>
-            R$ {locacao.valor_total}
+            R$ {locacao.total_locatario}
           </Text>
         </View>
       </View>

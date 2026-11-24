@@ -29,7 +29,9 @@ import { Spacing, BorderRadius, Shadows } from '../../theme/spacing';
 import { BrandColors } from '../../theme/colors';
 import { Button } from '../../components/ui/Button';
 import { Avatar } from '../../components/ui/Avatar';
-import { useAuthStore } from '../../store/authStore';
+import { useQuery } from '@tanstack/react-query';
+import { useAuthStore, nomeDoUsuario } from '../../store/authStore';
+import { authApi } from '../../api/auth';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { MainStackParamList } from '../../navigation/types';
@@ -156,7 +158,7 @@ function MenuItem({
 export function ProfileScreen(): React.JSX.Element {
   const { colors, isDark, mode } = useTheme();
   const { toggle: toggleTema } = useThemeModeStore();
-  const { user, logout } = useAuthStore();
+  const { user, logout, setUser } = useAuthStore();
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
 
   /** Confirma e executa logout */
@@ -180,17 +182,18 @@ export function ProfileScreen(): React.JSX.Element {
     Alert.alert(feature, 'Esta funcionalidade estará disponível em breve!');
   }, []);
 
-  const scoreEsg = user?.score_esg ?? 0;
-  const avaliacaoMedia = user?.avaliacao_media ?? 0;
+  // Atualiza o perfil ao abrir a tela (o score ESG muda quando uma locação é concluída)
+  useQuery({
+    queryKey: ['perfil'],
+    queryFn: async () => {
+      const perfil = await authApi.buscarPerfil();
+      setUser(perfil);
+      return perfil;
+    },
+  });
 
-  /** Renderiza estrelas */
-  const renderEstrelas = (nota: number): string => {
-    const estrelas: string[] = [];
-    for (let i = 1; i <= 5; i++) {
-      estrelas.push(i <= Math.round(nota) ? '★' : '☆');
-    }
-    return estrelas.join('');
-  };
+  const scoreEsg = user?.score_esg ?? 0;
+  const nome = nomeDoUsuario(user) || 'Usuário';
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
@@ -217,7 +220,7 @@ export function ProfileScreen(): React.JSX.Element {
         >
           {/* Avatar com botão de edição */}
           <View style={styles.avatarContainer}>
-            <Avatar name={user?.nome || 'Usuário'} size="xl" />
+            <Avatar name={nome} size="xl" />
             <TouchableOpacity
               style={[
                 styles.editarAvatarBotao,
@@ -231,12 +234,12 @@ export function ProfileScreen(): React.JSX.Element {
 
           {/* Nome */}
           <Text style={[styles.perfilNome, { color: colors.text }]}>
-            {user?.nome || 'Usuário'}
+            {nome}
           </Text>
 
           {/* Email */}
           <Text style={[styles.perfilEmail, { color: colors.textSecondary }]}>
-            {user?.email || 'email@exemplo.com'}
+            {user?.email}
           </Text>
 
           {/* Badge tipo de conta */}
@@ -245,26 +248,17 @@ export function ProfileScreen(): React.JSX.Element {
               styles.tipoBadge,
               {
                 backgroundColor:
-                  user?.tipo_conta === 'B2B'
+                  user?.tipo_usuario === 'B2B'
                     ? BrandColors.secondary
                     : BrandColors.primary,
               },
             ]}
           >
             <Text style={styles.tipoBadgeTexto}>
-              {user?.tipo_conta === 'B2B' ? '🏢 Lojista B2B' : '👤 Pessoa Física P2P'}
+              {user?.tipo_usuario === 'B2B' ? '🏢 Lojista B2B' : '👤 Pessoa Física P2P'}
             </Text>
           </View>
 
-          {/* Avaliação */}
-          <View style={styles.avaliacaoRow}>
-            <Text style={[styles.avaliacaoEstrelas, { color: BrandColors.highlight }]}>
-              {renderEstrelas(avaliacaoMedia)}
-            </Text>
-            <Text style={[styles.avaliacaoNota, { color: colors.text }]}>
-              {avaliacaoMedia.toFixed(1)}
-            </Text>
-          </View>
         </View>
 
         {/* Score ESG */}

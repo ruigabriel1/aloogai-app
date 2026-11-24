@@ -55,3 +55,33 @@ else:
         def __init__(self, **kwargs):
             self.km = kwargs.get("km", 0)
             self.m = kwargs.get("m", 0)
+
+
+def coordenadas(valor) -> tuple[float | None, float | None]:
+    """
+    Devolve (latitude, longitude) de um ponto, com ou sem GIS.
+
+    Aceita um Point do GEOS ou o texto WKT do modo SQLite ("POINT (lng lat)" ou
+    "SRID=4326;POINT(lng lat)").
+    """
+    import re
+
+    if not valor:
+        return None, None
+    if hasattr(valor, "x") and hasattr(valor, "y"):
+        return float(valor.y), float(valor.x)
+    numeros = re.findall(r"-?\d+(?:\.\d+)?", str(valor).split(";")[-1])
+    if len(numeros) < 2:
+        return None, None
+    lng, lat = float(numeros[0]), float(numeros[1])
+    return lat, lng
+
+
+def distancia_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Distância em km entre dois pontos (fórmula de haversine)."""
+    from math import asin, cos, radians, sin, sqrt
+
+    dlat = radians(lat2 - lat1)
+    dlng = radians(lng2 - lng1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlng / 2) ** 2
+    return 6371.0 * 2 * asin(sqrt(a))

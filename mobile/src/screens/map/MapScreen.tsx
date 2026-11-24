@@ -36,7 +36,8 @@ import { useLocation } from '../../hooks/useLocation';
 import {
   buscarItensProximidade,
   buscarCategorias,
-  type ItemProximidade,
+  type ItemResumo,
+  type ItemNoMapa,
   type FiltrosBusca,
 } from '../../api/catalog';
 import { ItemMarker } from '../../components/map/ItemMarker';
@@ -110,15 +111,15 @@ export function MapScreen(): React.JSX.Element {
   // Estado local
   const [textoBusca, setTextoBusca] = useState('');
   const [categoriaAtiva, setCategoriaAtiva] = useState<string | null>(null);
-  const [itemSelecionado, setItemSelecionado] = useState<ItemProximidade | null>(null);
+  const [itemSelecionado, setItemSelecionado] = useState<ItemResumo | null>(null);
   const [bottomSheetVisivel, setBottomSheetVisivel] = useState(false);
   const [raioKm] = useState(RAIO_PADRAO_KM);
 
   // Filtros de busca
   const filtros = useMemo<FiltrosBusca>(
     () => ({
-      categoria_id: categoriaAtiva,
-      q: textoBusca || undefined,
+      categoria: categoriaAtiva,
+      busca: textoBusca || undefined,
     }),
     [categoriaAtiva, textoBusca],
   );
@@ -130,10 +131,7 @@ export function MapScreen(): React.JSX.Element {
     refetch: refetchItens,
   } = useQuery({
     queryKey: ['itens-proximidade', latitude, longitude, raioKm, filtros],
-    queryFn: async () => {
-      const data = await buscarItensProximidade(latitude, longitude, raioKm, filtros);
-      return data || { type: 'FeatureCollection', features: [] };
-    },
+    queryFn: () => buscarItensProximidade(latitude, longitude, raioKm, filtros),
     enabled: !locationLoading,
     staleTime: 2 * 60 * 1000, // 2 minutos
   });
@@ -148,15 +146,14 @@ export function MapScreen(): React.JSX.Element {
     staleTime: 10 * 60 * 1000, // 10 minutos
   });
 
-  // Extrai itens do GeoJSON
-  const itens = useMemo<ItemProximidade[]>(() => {
-    if (!itensData?.features) return [];
-    return itensData.features.map((feature) => ({
-      ...feature.properties,
-      latitude: feature.geometry.coordinates[1],
-      longitude: feature.geometry.coordinates[0],
-    }));
-  }, [itensData]);
+  // Só itens com coordenadas entram no mapa
+  const itens = useMemo<ItemNoMapa[]>(
+    () =>
+      (itensData?.results ?? []).filter(
+        (item): item is ItemNoMapa => item.latitude !== null && item.longitude !== null,
+      ),
+    [itensData],
+  );
 
   /** Centraliza o mapa na posição do usuário */
   const centralizarMapa = useCallback(() => {
@@ -172,7 +169,7 @@ export function MapScreen(): React.JSX.Element {
   }, [latitude, longitude]);
 
   /** Seleciona um item no mapa */
-  const selecionarItem = useCallback((item: ItemProximidade) => {
+  const selecionarItem = useCallback((item: ItemNoMapa) => {
     setItemSelecionado(item);
     setBottomSheetVisivel(true);
 
@@ -250,7 +247,7 @@ export function MapScreen(): React.JSX.Element {
             titulo={item.titulo}
             precoDiaria={item.preco_diaria}
             isDestacado={item.is_destacado}
-            categoriaIcone={item.categoria?.icone}
+            categoriaIcone={item.categoria_icone || undefined}
             onPress={() => selecionarItem(item)}
           />
         ))}

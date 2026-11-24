@@ -38,7 +38,7 @@ import { useLocation } from '../../hooks/useLocation';
 import {
   buscarItensProximidade,
   buscarCategorias,
-  type ItemProximidade,
+  type ItemResumo,
   type FiltrosBusca,
 } from '../../api/catalog';
 
@@ -61,8 +61,8 @@ export function FeedScreen(): React.JSX.Element {
   // Filtros de busca
   const filtros = useMemo<FiltrosBusca>(
     () => ({
-      categoria_id: categoriaAtiva,
-      q: textoBusca || undefined,
+      categoria: categoriaAtiva,
+      busca: textoBusca || undefined,
     }),
     [categoriaAtiva, textoBusca],
   );
@@ -75,10 +75,7 @@ export function FeedScreen(): React.JSX.Element {
     isError,
   } = useQuery({
     queryKey: ['itens-proximidade', latitude, longitude, raioKm, filtros],
-    queryFn: async () => {
-      const data = await buscarItensProximidade(latitude, longitude, raioKm, filtros);
-      return data || { type: 'FeatureCollection', features: [] };
-    },
+    queryFn: () => buscarItensProximidade(latitude, longitude, raioKm, filtros),
     enabled: !locationLoading,
     staleTime: 2 * 60 * 1000,
   });
@@ -93,15 +90,7 @@ export function FeedScreen(): React.JSX.Element {
     staleTime: 10 * 60 * 1000,
   });
 
-  // Extrai itens do GeoJSON
-  const itens = useMemo<ItemProximidade[]>(() => {
-    if (!itensData?.features) return [];
-    return itensData.features.map((feature) => ({
-      ...feature.properties,
-      latitude: feature.geometry.coordinates[1],
-      longitude: feature.geometry.coordinates[0],
-    }));
-  }, [itensData]);
+  const itens = useMemo<ItemResumo[]>(() => itensData?.results ?? [], [itensData]);
 
   const toggleCategoria = useCallback((categoriaId: string) => {
     setCategoriaAtiva((prev) => (prev === categoriaId ? null : categoriaId));
@@ -111,7 +100,7 @@ export function FeedScreen(): React.JSX.Element {
     navigation.navigate('MapModal');
   }, [navigation]);
 
-  const renderItemCard = ({ item }: { item: ItemProximidade }) => (
+  const renderItemCard = ({ item }: { item: ItemResumo }) => (
     <TouchableOpacity
       style={[
         styles.cardContainer,
@@ -126,7 +115,7 @@ export function FeedScreen(): React.JSX.Element {
           <Image source={{ uri: item.foto_capa_url }} style={styles.cardImagem} />
         ) : (
           <View style={[styles.cardImagemPlaceholder, { backgroundColor: colors.background }]}>
-            <Text style={{ fontSize: 32 }}>{item.categoria?.icone || '📦'}</Text>
+            <Text style={{ fontSize: 32 }}>{item.categoria_icone || '📦'}</Text>
           </View>
         )}
         {item.is_destacado && (
@@ -144,9 +133,9 @@ export function FeedScreen(): React.JSX.Element {
         </Text>
         <View style={styles.cardRodape}>
           <Text style={[styles.cardDistancia, { color: colors.textSecondary }]}>
-            📍 {item.distancia_km.toFixed(1)} km
+            📍 {item.distancia_km !== null ? `${item.distancia_km.toFixed(1)} km` : ''}
           </Text>
-          {item.avaliacao_media && (
+          {item.total_avaliacoes > 0 && (
             <Text style={[styles.cardAvaliacao, { color: colors.textSecondary }]}>
               ⭐ {item.avaliacao_media.toFixed(1)}
             </Text>

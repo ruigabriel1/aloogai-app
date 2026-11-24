@@ -22,6 +22,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -30,7 +31,7 @@ import { useTheme } from '../../theme';
 import { TextStyles, FontFamily, FontSize } from '../../theme/typography';
 import { Spacing, BorderRadius, Shadows } from '../../theme/spacing';
 import { BrandColors } from '../../theme/colors';
-import { listarMensagens, type Mensagem } from '../../api/chat';
+import { listarMensagens, enviarMensagem, marcarLidas, type Mensagem } from '../../api/chat';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { useAuthStore } from '../../store/authStore';
 import { MessageBubble } from '../../components/chat/MessageBubble';
@@ -49,20 +50,26 @@ export function ChatRoomScreen(): React.JSX.Element {
 
   // Estado do input
   const [textoMensagem, setTextoMensagem] = useState('');
-  const [digitandoTimeout, setDigitandoTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
 
   // Mensagens históricas via API
   const {
     data: mensagensHistoricas,
     isLoading,
+    refetch: recarregarMensagens,
   } = useQuery({
     queryKey: ['mensagens', salaId],
     queryFn: () => listarMensagens(salaId),
   });
 
+  // Ao abrir a conversa, marca as mensagens recebidas como lidas
+  useEffect(() => {
+    marcarLidas(salaId).catch(() => undefined);
+  }, [salaId]);
+
   // WebSocket para tempo real
   const {
     conectado,
+    erro: erroChat,
     mensagens: mensagensWS,
     digitando,
     enviarMensagem: enviarMensagemWS,
@@ -81,7 +88,7 @@ export function ChatRoomScreen(): React.JSX.Element {
 
     // Invertida: mais recentes primeiro (para FlatList invertida)
     return [...historicas, ...novasMensagensWS].sort(
-      (a, b) => new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime(),
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
   }, [mensagensHistoricas, mensagensWS]);
 
@@ -90,43 +97,39 @@ export function ChatRoomScreen(): React.JSX.Element {
     const texto = textoMensagem.trim();
     if (!texto) return;
 
-    enviarMensagemWS(texto);
     setTextoMensagem('');
-  }, [textoMensagem, enviarMensagemWS]);
+    // Sem WebSocket (rede instável), envia pela API REST e recarrega a conversa
+    if (!enviarMensagemWS(texto)) {
+      enviarMensagem(salaId, texto)
+        .then(() => recarregarMensagens())
+        .catch(() => {
+          setTextoMensagem(texto);
+          Alert.alert('Erro', 'Não foi possível enviar a mensagem.');
+        });
+    }
+  }, [textoMensagem, enviarMensagemWS, salaId, recarregarMensagens]);
 
   /** Notifica que está digitando (debounced) */
   const handleTextoChange = useCallback(
     (texto: string) => {
       setTextoMensagem(texto);
-
-      // Debounce do evento de digitação
-      if (digitandoTimeout) {
-        clearTimeout(digitandoTimeout);
-      }
-
-      if (texto.length > 0) {
-        enviarDigitando();
-        setDigitandoTimeout(
-          setTimeout(() => {
-            // Sem ação após 3s sem digitar
-          }, 3000),
-        );
-      }
+      // O hook já limita o aviso a um envio a cada 2 segundos
+      if (texto.length > 0) enviarDigitando();
     },
-    [enviarDigitando, digitandoTimeout],
+    [enviarDigitando],
   );
 
   /** Renderiza uma mensagem */
   const renderMensagem = ({ item: mensagem }: { item: Mensagem }) => {
-    const enviada = mensagem.remetente.id === userId;
+    const enviada = mensagem.remetente === userId;
 
     return (
       <MessageBubble
         conteudo={mensagem.conteudo}
         enviada={enviada}
-        lida={mensagem.lida}
-        timestamp={mensagem.criado_em}
-        nomeRemetente={!enviada ? mensagem.remetente.nome : undefined}
+        lida={mensagem.lida_em !== null}
+        timestamp={mensagem.created_at}
+        nomeRemetente={!enviada ? nomeOutroUsuario : undefined}
       />
     );
   };
@@ -180,6 +183,11 @@ export function ChatRoomScreen(): React.JSX.Element {
           >
             📦 {itemTitulo}
           </Text>
+          {erroChat ? (
+            <Text style={[styles.headerItem, { color: colors.error }]} numberOfLines={1}>
+              {erroChat}
+            </Text>
+          ) : null}
         </View>
       </View>
 
@@ -209,7 +217,7 @@ export function ChatRoomScreen(): React.JSX.Element {
             ListHeaderComponent={
               digitando ? (
                 <TypingIndicator
-                  nome={digitando.nome}
+                  nome={nomeOutroUsuario}
                   visivel={true}
                 />
               ) : null

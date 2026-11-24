@@ -17,7 +17,8 @@ import * as SplashScreen from 'expo-splash-screen';
 import * as Font from 'expo-font';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './src/api/queryClient';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet, View } from 'react-native';
 import { AppNavigator } from './src/navigation/AppNavigator';
@@ -27,20 +28,6 @@ import { LightThemeColors, DarkThemeColors } from './src/theme/colors';
 
 // Mantém o splash screen visível enquanto carrega recursos
 SplashScreen.preventAutoHideAsync();
-
-/** Instância do QueryClient para TanStack Query */
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      /** Não refetcha automaticamente ao focar a tela */
-      refetchOnWindowFocus: false,
-      /** Tenta 2 vezes antes de falhar */
-      retry: 2,
-      /** Cache de 5 minutos */
-      staleTime: 5 * 60 * 1000,
-    },
-  },
-});
 
 /**
  * Tema de navegação para Light mode.

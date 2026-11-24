@@ -1,116 +1,82 @@
 /**
  * API de Chat do Aloogaí
  *
- * Funções para gerenciar salas de chat e mensagens.
- * O chat é habilitado somente após uma solicitação de locação.
- * Endpoints: /chat/
+ * Os tipos espelham backend/apps/chat/serializers.py.
  */
 
 import { apiClient } from './client';
+import type { Paginado } from './catalog';
 
 // ─── Tipos ──────────────────────────────────────────────
 
-/** Participante da sala de chat */
-export interface Participante {
-  id: string;
-  nome: string;
-  foto_perfil?: string;
-}
-
-/** Resumo do item vinculado à sala */
-export interface ItemSala {
-  id: string;
-  titulo: string;
-  foto_capa_url: string;
-}
-
-/** Sala de chat */
+/** SalaChatSerializer */
 export interface SalaChat {
   id: string;
-  locacao_id: string;
-  participantes: Participante[];
-  item: ItemSala;
-  ultima_mensagem?: {
-    conteudo: string;
-    remetente_id: string;
-    criado_em: string;
-  };
+  locacao: string;
+  locador: string;
+  locatario: string;
+  item_titulo: string;
+  outro_participante: { id: string; nome: string };
+  ativa: boolean;
+  chat_permitido: boolean;
+  total_mensagens: number;
   nao_lidas: number;
-  criado_em: string;
-  atualizado_em: string;
+  ultima_mensagem: {
+    id: string;
+    remetente: string;
+    conteudo: string;
+    tipo: string;
+    created_at: string;
+  } | null;
+  created_at: string;
 }
 
-/** Mensagem individual */
+/** MensagemSerializer (REST) e evento "mensagem" do WebSocket */
 export interface Mensagem {
   id: string;
-  sala_id: string;
-  remetente: Participante;
+  sala: string;
+  remetente: string;
   conteudo: string;
-  lida: boolean;
-  criado_em: string;
-}
-
-/** Resposta paginada de salas */
-export interface SalasResponse {
-  results: SalaChat[];
-  count: number;
-  next: string | null;
-  previous: string | null;
-}
-
-/** Resposta paginada de mensagens */
-export interface MensagensResponse {
-  results: Mensagem[];
-  count: number;
-  next: string | null;
-  previous: string | null;
+  tipo: string;
+  lida_em: string | null;
+  created_at: string;
 }
 
 // ─── Funções da API ─────────────────────────────────────
 
-/**
- * Lista todas as salas de chat do usuário.
- *
- * GET /chat/salas/
- */
+/** GET chat/salas/ */
 export async function listarSalas(): Promise<SalaChat[]> {
-  const response = await apiClient.get<SalasResponse>('chat/salas/');
+  const response = await apiClient.get<Paginado<SalaChat>>('chat/salas/');
   return response.data.results;
 }
 
-/**
- * Lista as mensagens de uma sala específica.
- *
- * GET /chat/salas/{salaId}/mensagens/
- */
-export async function listarMensagens(salaId: string): Promise<Mensagem[]> {
-  const response = await apiClient.get<MensagensResponse>(
-    `chat/salas/${salaId}/mensagens/`,
-  );
-  return response.data.results;
-}
-
-/**
- * Envia uma mensagem em uma sala.
- *
- * POST /chat/salas/{salaId}/mensagens/
- */
-export async function enviarMensagem(
-  salaId: string,
-  conteudo: string,
-): Promise<Mensagem> {
-  const response = await apiClient.post<Mensagem>(
-    `chat/salas/${salaId}/mensagens/`,
-    { conteudo },
-  );
+/** GET chat/salas/{id}/ */
+export async function obterSala(salaId: string): Promise<SalaChat> {
+  const response = await apiClient.get<SalaChat>(`chat/salas/${salaId}/`);
   return response.data;
 }
 
-/** Re-export por conveniência */
-export const chatApi = {
-  listarSalas,
-  listarMensagens,
-  enviarMensagem,
-};
+/** GET chat/salas/{id}/mensagens/ */
+export async function listarMensagens(salaId: string): Promise<Mensagem[]> {
+  const response = await apiClient.get<Paginado<Mensagem> | Mensagem[]>(
+    `chat/salas/${salaId}/mensagens/`,
+  );
+  return Array.isArray(response.data) ? response.data : response.data.results;
+}
+
+/** POST chat/salas/{id}/mensagens/ (alternativa ao WebSocket) */
+export async function enviarMensagem(salaId: string, conteudo: string): Promise<Mensagem> {
+  const response = await apiClient.post<Mensagem>(`chat/salas/${salaId}/mensagens/`, {
+    conteudo,
+  });
+  return response.data;
+}
+
+/** POST chat/salas/{id}/mensagens/marcar-lidas/ */
+export async function marcarLidas(salaId: string): Promise<void> {
+  await apiClient.post(`chat/salas/${salaId}/mensagens/marcar-lidas/`);
+}
+
+export const chatApi = { listarSalas, obterSala, listarMensagens, enviarMensagem, marcarLidas };
 
 export default chatApi;

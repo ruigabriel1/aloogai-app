@@ -28,7 +28,7 @@ import { useTheme } from '../../theme';
 import { TextStyles, FontFamily, FontSize } from '../../theme/typography';
 import { Spacing, BorderRadius, Shadows } from '../../theme/spacing';
 import { BrandColors } from '../../theme/colors';
-import { authApi } from '../../api/auth';
+import { authApi, mensagemDeErro } from '../../api/auth';
 import { useAuthStore } from '../../store/authStore';
 
 type RegisterNavProp = NativeStackNavigationProp<AuthStackParamList, 'Register'>;
@@ -155,30 +155,24 @@ export function RegisterScreen(): React.JSX.Element {
 
     setLoading(true);
     try {
+      // O backend separa nome e sobrenome (first_name / last_name)
+      const [primeiroNome, ...resto] = nome.trim().split(/\s+/);
       const response = await authApi.register({
-        nome: nome.trim(),
+        first_name: primeiroNome,
+        last_name: resto.join(' '),
         email: email.trim().toLowerCase(),
-        cpf: cpf.replace(/\D/g, ''),
+        cpf_cnpj: cpf.replace(/\D/g, ''),
         telefone: telefone.replace(/\D/g, ''),
         password: senha,
         password_confirm: confirmarSenha,
-        tipo_conta: tipoConta,
+        tipo_usuario: tipoConta,
       });
       await authLogin(response.access, response.refresh, response.user);
     } catch (error: unknown) {
-      const data = (error as { response?: { data?: Record<string, unknown> } })?.response?.data;
-      let mensagem = 'Não foi possível criar a conta. Tente novamente.';
-
-      if (data) {
-        const firstError = Object.values(data)[0];
-        if (Array.isArray(firstError) && firstError.length > 0) {
-          mensagem = String(firstError[0]);
-        } else if (typeof firstError === 'string') {
-          mensagem = firstError;
-        }
-      }
-
-      Alert.alert('Erro no cadastro', mensagem);
+      Alert.alert(
+        'Erro no cadastro',
+        mensagemDeErro(error, 'Não foi possível criar a conta. Tente novamente.'),
+      );
     } finally {
       setLoading(false);
     }

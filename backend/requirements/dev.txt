@@ -9,3 +9,6 @@ pytest==8.4.2
 pytest-django==4.14.0
 factory-boy==3.3.3
 Faker==40.21.0
+
+# --- WebSocket nos testes (channels.testing) ---
+daphne==4.2.3

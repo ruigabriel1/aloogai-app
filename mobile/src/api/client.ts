@@ -8,12 +8,13 @@
 
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore } from '../store/authStore';
+import { API_URL } from '../config';
 
-/** URL base da API (IP da máquina local para testes em celular físico) */
-const API_BASE_URL = 'http://192.168.25.18:8000/api/v1/';
+/** URL base da API (definida por EXPO_PUBLIC_API_URL; ver src/config.ts) */
+const API_BASE_URL = API_URL;
 
-/** Timeout padrão de 30 segundos */
-const TIMEOUT = 30000;
+/** Timeout padrão de 15 segundos */
+const TIMEOUT = 15000;
 
 /**
  * Instância Axios configurada para o backend do Aloogaí.
@@ -101,7 +102,7 @@ apiClient.interceptors.response.use(
     originalRequest._retry = true;
     isRefreshing = true;
 
-    const { refreshToken, setToken, logout } = useAuthStore.getState();
+    const { refreshToken, setTokens, logout } = useAuthStore.getState();
 
     if (!refreshToken) {
       isRefreshing = false;
@@ -114,8 +115,9 @@ apiClient.interceptors.response.use(
         refresh: refreshToken,
       });
 
+      // O backend rotaciona o refresh (e invalida o antigo): guardar os dois.
       const newToken = response.data.access as string;
-      await setToken(newToken);
+      await setTokens(newToken, response.data.refresh as string | undefined);
 
       if (originalRequest.headers) {
         originalRequest.headers.Authorization = `Bearer ${newToken}`;

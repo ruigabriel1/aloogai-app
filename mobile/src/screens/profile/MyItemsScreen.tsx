@@ -10,7 +10,7 @@ import { useTheme } from '../../theme';
 import { TextStyles, FontFamily, FontSize } from '../../theme/typography';
 import { Spacing, BorderRadius, Shadows } from '../../theme/spacing';
 import { BrandColors } from '../../theme/colors';
-import { buscarMeusItens } from '../../api/catalog';
+import { buscarMeusItens, type ItemResumo } from '../../api/catalog';
 import { Button } from '../../components/ui/Button';
 
 export function MyItemsScreen(): React.JSX.Element {
@@ -28,7 +28,7 @@ export function MyItemsScreen(): React.JSX.Element {
     staleTime: 60 * 1000,
   });
 
-  const renderItemCard = ({ item }: { item: any }) => (
+  const renderItemCard = ({ item }: { item: ItemResumo }) => (
     <TouchableOpacity
       style={[
         styles.cardContainer,
@@ -39,11 +39,11 @@ export function MyItemsScreen(): React.JSX.Element {
       activeOpacity={0.8}
     >
       <View style={styles.cardImagemContainer}>
-        {item.fotos && item.fotos.length > 0 ? (
-          <Image source={{ uri: item.fotos[0].url }} style={styles.cardImagem} />
+        {item.foto_capa_url ? (
+          <Image source={{ uri: item.foto_capa_url }} style={styles.cardImagem} />
         ) : (
           <View style={[styles.cardImagemPlaceholder, { backgroundColor: colors.surfaceVariant }]}>
-            <Text style={{ fontSize: 32 }}>{item.categoria?.icone || '📦'}</Text>
+            <Text style={{ fontSize: 32 }}>📦</Text>
           </View>
         )}
         {item.is_destacado && (

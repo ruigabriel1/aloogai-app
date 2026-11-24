@@ -24,14 +24,14 @@ import { useTheme } from '../../theme';
 import { TextStyles, FontFamily, FontSize } from '../../theme/typography';
 import { Spacing, BorderRadius, Shadows } from '../../theme/spacing';
 import { BrandColors } from '../../theme/colors';
-import type { ItemProximidade } from '../../api/catalog';
+import type { ItemResumo } from '../../api/catalog';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 /** Props do ItemBottomSheet */
 export interface ItemBottomSheetProps {
   /** Item selecionado no mapa */
-  item: ItemProximidade | null;
+  item: ItemResumo | null;
   /** Se o sheet está visível */
   visivel: boolean;
   /** Callback ao pressionar "Ver Detalhes" */
@@ -83,7 +83,8 @@ export function ItemBottomSheet({
   };
 
   /** Formata distância para exibição */
-  const formatarDistancia = (km: number): string => {
+  const formatarDistancia = (km: number | null): string => {
+    if (km === null) return '';
     if (km < 1) {
       return `${Math.round(km * 1000)}m`;
     }

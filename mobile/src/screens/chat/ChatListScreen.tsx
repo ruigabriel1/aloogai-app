@@ -30,7 +30,6 @@ import { TextStyles, FontFamily, FontSize } from '../../theme/typography';
 import { Spacing, BorderRadius, Shadows } from '../../theme/spacing';
 import { BrandColors } from '../../theme/colors';
 import { listarSalas, type SalaChat } from '../../api/chat';
-import { useAuthStore } from '../../store/authStore';
 import type { MainStackParamList } from '../../navigation/types';
 
 /** Formata timestamp para exibição relativa */
@@ -56,7 +55,6 @@ function formatarTempo(iso: string): string {
 export function ChatListScreen(): React.JSX.Element {
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
-  const userId = useAuthStore((state) => state.user?.id);
 
   // Query de salas
   const {
@@ -74,25 +72,18 @@ export function ChatListScreen(): React.JSX.Element {
     (sala: SalaChat) => {
       navigation.navigate('ChatRoom', {
         salaId: sala.id,
-        locacaoId: sala.locacao_id,
-        nomeOutroUsuario: getOutroParticipante(sala)?.nome || 'Chat',
-        itemTitulo: sala.item.titulo,
+        locacaoId: sala.locacao,
+        nomeOutroUsuario: sala.outro_participante.nome || 'Chat',
+        itemTitulo: sala.item_titulo,
       });
     },
-    [navigation, userId],
-  );
-
-  /** Obtém o outro participante da sala */
-  const getOutroParticipante = useCallback(
-    (sala: SalaChat) => {
-      return sala.participantes.find((p) => p.id !== userId) || sala.participantes[0];
-    },
-    [userId],
+    [navigation],
   );
 
   /** Renderiza uma sala de chat */
   const renderSala = ({ item: sala }: { item: SalaChat }) => {
-    const outroUsuario = getOutroParticipante(sala);
+    // O backend já devolve a outra pessoa da conversa do ponto de vista de quem pediu
+    const outroUsuario = sala.outro_participante;
     const temNaoLidas = sala.nao_lidas > 0;
 
     return (
@@ -138,7 +129,7 @@ export function ChatListScreen(): React.JSX.Element {
             </Text>
             {sala.ultima_mensagem && (
               <Text style={[styles.salaTempo, { color: colors.textTertiary }]}>
-                {formatarTempo(sala.ultima_mensagem.criado_em)}
+                {formatarTempo(sala.ultima_mensagem.created_at)}
               </Text>
             )}
           </View>
@@ -151,7 +142,7 @@ export function ChatListScreen(): React.JSX.Element {
               ]}
               numberOfLines={1}
             >
-              📦 {sala.item.titulo}
+              📦 {sala.item_titulo}
             </Text>
           </View>
 

@@ -29,7 +29,7 @@ import { useTheme } from '../../theme';
 import { TextStyles, FontFamily, FontSize } from '../../theme/typography';
 import { Spacing, BorderRadius, Shadows } from '../../theme/spacing';
 import { BrandColors } from '../../theme/colors';
-import { authApi } from '../../api/auth';
+import { authApi, mensagemDeErro } from '../../api/auth';
 import { useAuthStore } from '../../store/authStore';
 
 type LoginNavProp = NativeStackNavigationProp<AuthStackParamList, 'Login'>;
@@ -82,9 +82,11 @@ export function LoginScreen(): React.JSX.Element {
       });
       await authLogin(response.access, response.refresh, response.user);
     } catch (error: unknown) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
       const mensagem =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        'E-mail ou senha incorretos. Tente novamente.';
+        status === 401
+          ? 'E-mail ou senha incorretos. Tente novamente.'
+          : mensagemDeErro(error, 'Não foi possível conectar ao servidor. Verifique sua conexão.');
       Alert.alert('Erro no login', mensagem);
     } finally {
       setLoading(false);

@@ -56,10 +56,9 @@ export function CheckoutModal(): React.JSX.Element {
         throw new Error('Datas inválidas.');
       }
       return criarLocacao({
-        item_id: itemId,
+        item: itemId,
         data_inicio: dataInicio,
         data_fim: dataFim,
-        payment_method_id: 'pm_card_br' // Mockado para Stripe test mode
       });
     },
     onSuccess: () => {
