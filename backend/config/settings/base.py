@@ -67,6 +67,7 @@ THIRD_PARTY_APPS = [
     "rest_framework",
     "rest_framework_gis",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "django_filters",
     "django_fsm",
@@ -354,6 +355,19 @@ AWS_S3_OBJECT_PARAMETERS = {
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")
 STRIPE_PUBLISHABLE_KEY = env("STRIPE_PUBLISHABLE_KEY", default="")
 STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
+
+# ==============================================================================
+# Integrações gerais
+# ==============================================================================
+
+# Banco sem PostGIS (SQLite). Só o dev liga por padrão; lido por apps/core/geo_compat.py.
+USE_SQLITE = env.bool("USE_SQLITE", default=False)
+
+# URL para onde o Stripe devolve o usuário após o onboarding.
+FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:8081")
+
+# Chave Fernet das mensagens do chat em repouso. Obrigatória em produção (ver prod.py).
+CHAT_ENCRYPTION_KEY = env("CHAT_ENCRYPTION_KEY", default="")
 
 # ==============================================================================
 # Regras de Negócio — Aloogaí (Invariantes do gemini.md)

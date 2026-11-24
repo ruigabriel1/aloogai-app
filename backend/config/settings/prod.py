@@ -23,6 +23,32 @@ DEBUG = False
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS")
 
 # ==============================================================================
+# Variáveis obrigatórias — falha na subida em vez de falhar no meio de uma requisição
+# ==============================================================================
+
+from django.core.exceptions import ImproperlyConfigured  # noqa: E402
+
+from config.settings.base import (  # noqa: E402
+    CHAT_ENCRYPTION_KEY,
+    STRIPE_SECRET_KEY,
+    STRIPE_WEBHOOK_SECRET,
+    USE_SQLITE,
+)
+
+_obrigatorias = {
+    "CHAT_ENCRYPTION_KEY": CHAT_ENCRYPTION_KEY,
+    "STRIPE_SECRET_KEY": STRIPE_SECRET_KEY,
+    "STRIPE_WEBHOOK_SECRET": STRIPE_WEBHOOK_SECRET,
+}
+_faltando = [nome for nome, valor in _obrigatorias.items() if not valor]
+if _faltando:
+    raise ImproperlyConfigured(
+        f"Variáveis obrigatórias em produção não definidas: {', '.join(_faltando)}"
+    )
+if USE_SQLITE:
+    raise ImproperlyConfigured("USE_SQLITE=True não é permitido em produção (exige PostGIS).")
+
+# ==============================================================================
 # Apps adicionais de produção
 # ==============================================================================
 

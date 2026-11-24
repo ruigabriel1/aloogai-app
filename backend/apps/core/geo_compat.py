@@ -1,37 +1,32 @@
 """
 Módulo de compatibilidade para campos geoespaciais.
 
-Quando GDAL/PostGIS não está disponível (desenvolvimento local com SQLite),
-faz fallback para campos normais do Django. Em produção com PostGIS,
-usa os campos geoespaciais reais.
+Com `settings.USE_SQLITE = True` (padrão só no dev local), usa campos de texto no lugar
+dos campos do PostGIS. Em qualquer outro caso, usa o PostGIS de verdade e um erro de
+GDAL/GEOS aparece na hora, em vez de cair em silêncio para o modo texto.
 """
 
-import os
+from django.conf import settings
 
-USE_SQLITE = os.environ.get("USE_SQLITE", "True").lower() in ("true", "1")
+USE_SQLITE = getattr(settings, "USE_SQLITE", False)
 
-try:
-    if USE_SQLITE:
-        raise ImportError("Forçando fallback SQLite")
-
+if not USE_SQLITE:
     from django.contrib.gis.db import models as gis_models
-    from django.contrib.gis.geos import Point
-    from django.contrib.gis.measure import D
+    from django.contrib.gis.geos import Point  # noqa: F401
+    from django.contrib.gis.measure import D  # noqa: F401
 
     HAS_GIS = True
-
-    # Exportar PointField real
     PointField = gis_models.PointField
 
-except (ImportError, Exception):
+else:
     from django.db import models
 
     HAS_GIS = False
 
     class PointField(models.CharField):
         """
-        Fallback para PointField quando GIS não está disponível.
-        Armazena coordenadas como string 'lat,lng'.
+        Fallback para PointField sem GIS.
+        Armazena o ponto como texto WKT: 'POINT (lng lat)'.
         """
 
         def __init__(self, *args, **kwargs):
@@ -44,7 +39,7 @@ except (ImportError, Exception):
             super().__init__(*args, **kwargs)
 
     class Point:
-        """Fallback para Point."""
+        """Fallback para Point (x = longitude, y = latitude)."""
 
         def __init__(self, x=0, y=0, srid=4326):
             self.x = x

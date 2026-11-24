@@ -22,7 +22,7 @@ class Command(BaseCommand):
                 ),
                 'icone': 'leaf',
                 'requisito_locacoes': 10,
-                'requisito_score': None,
+                'requisito_score': 0,
             },
             {
                 'nome': 'Herói Circular',
@@ -32,7 +32,7 @@ class Command(BaseCommand):
                 ),
                 'icone': 'recycle',
                 'requisito_locacoes': 50,
-                'requisito_score': None,
+                'requisito_score': 0,
             },
             {
                 'nome': 'Embaixador ESG',
@@ -42,7 +42,7 @@ class Command(BaseCommand):
                 ),
                 'icone': 'globe',
                 'requisito_locacoes': 100,
-                'requisito_score': None,
+                'requisito_score': 0,
             },
             {
                 'nome': 'Estrela Sustentável',
@@ -51,7 +51,7 @@ class Command(BaseCommand):
                     'mais de 100 kg de CO₂ com suas locações.'
                 ),
                 'icone': 'star',
-                'requisito_locacoes': None,
+                'requisito_locacoes': 0,
                 'requisito_score': 100.0,
             },
             {
@@ -61,7 +61,7 @@ class Command(BaseCommand):
                     'Você é um guardião do planeta!'
                 ),
                 'icone': 'earth',
-                'requisito_locacoes': None,
+                'requisito_locacoes': 0,
                 'requisito_score': 500.0,
             },
         ]

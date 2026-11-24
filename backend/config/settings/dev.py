@@ -25,6 +25,7 @@ ALLOWED_HOSTS = ["*"]
 # Para usar PostGIS, defina USE_SQLITE=False e configure o PostgreSQL.
 
 USE_SQLITE = os.environ.get("USE_SQLITE", "True").lower() in ("true", "1")
+# geo_compat.py lê settings.USE_SQLITE; com USE_SQLITE=False o dev usa PostGIS (docker compose).
 
 if USE_SQLITE:
     DATABASES = {
@@ -106,6 +107,12 @@ LOGGING = {
     },
     "loggers": {
         "django.db.backends": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        # factory_boy loga cada objeto em DEBUG e polui a saída dos testes
+        "factory": {
             "handlers": ["console"],
             "level": "WARNING",
             "propagate": False,

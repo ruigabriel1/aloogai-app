@@ -13,7 +13,7 @@ import os
 from celery import Celery
 
 # Define o módulo de settings padrão do Django para o Celery
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.prod")
 
 app = Celery("aloogai")
 
