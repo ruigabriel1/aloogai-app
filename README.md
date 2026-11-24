@@ -1,80 +1,110 @@
 <div align="center">
-  <img src="logo.jpeg" alt="Aloogaí Logo" width="200" height="200" style="border-radius: 20px;">
+  <img src="logo.jpeg" alt="Logo do Aloogaí" width="160" height="160">
   <h1>Aloogaí</h1>
-  <p><b>A vizinhança é seu estoque. Alugue e economize.</b></p>
-  <p><i>Marketplace P2P/B2B de Locação por Proximidade e Economia Circular</i></p>
+  <p><b>Aluguel de objetos entre vizinhos: ache por perto, alugue com caução no cartão e converse em tempo real.</b></p>
 
-  [![React Native](https://img.shields.io/badge/React_Native-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactnative.dev/)
-  [![Django](https://img.shields.io/badge/Django-092E20?style=for-the-badge&logo=django&logoColor=green)](https://www.djangoproject.com/)
-  [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
-  [![Stripe](https://img.shields.io/badge/Stripe-626CD9?style=for-the-badge&logo=Stripe&logoColor=white)](https://stripe.com)
+  ![CI](https://github.com/ruigabriel1/aloogai-app/actions/workflows/ci.yml/badge.svg)
+  ![Django](https://img.shields.io/badge/Django-6.0-092E20?logo=django)
+  ![React Native](https://img.shields.io/badge/React_Native-Expo_54-20232A?logo=react)
+  ![PostGIS](https://img.shields.io/badge/PostGIS-busca_por_raio-336791?logo=postgresql&logoColor=white)
+  ![Stripe](https://img.shields.io/badge/Stripe-modo_teste-626CD9?logo=stripe&logoColor=white)
 </div>
-
-<br>
-
-## 🚀 Sobre o Projeto
-
-O **Aloogaí** é uma plataforma inovadora baseada na economia circular que permite às pessoas (P2P) e empresas (B2B) alugar itens do dia a dia (ferramentas, equipamentos de camping, eletrônicos) direto com vizinhos e comércios locais. O aplicativo funciona exibindo itens disponíveis baseados na **geolocalização e raio de distância**, criando um ecossistema sustentável que economiza dinheiro, tempo e reduz a emissão de CO₂ gerada pelo consumismo excessivo.
-
-## 🌟 Principais Funcionalidades
-
-- 📍 **Busca Geoespacial Avançada:** Encontre os itens mais próximos de você em um mapa interativo ou feed dinâmico usando cálculos espaciais via **PostGIS**.
-- 💳 **Split de Pagamentos & Caução Digital:** Integração nativa com **Stripe Connect** retendo cauções como pré-autorização (sem cobrar na hora) e dividindo a comissão do app (15% locador / 10% locatário) de maneira transparente.
-- 💬 **Chat em Tempo Real:** Negocie as entregas e devoluções através de um chat seguro de ponta a ponta construído com **WebSockets** via Django Channels e Redis.
-- 🌱 **Score ESG e Gamificação:** O app calcula a estimativa de CO₂ poupado ao alugar um item em vez de comprá-lo novo, convertendo isso num "Score de Impacto Positivo" exibido no perfil do usuário.
-- 🔒 **KYC Automatizado:** Fluxos de verificação de identidade e licenciamento segregando usuários comuns de "Locadores Pro".
-
-## 🛠️ Stack Tecnológica (V.L.A.E.G.S)
-
-**Mobile (Frontend):**
-- React Native (TypeScript) + Expo
-- React Navigation (Bottom Tabs + Fullscreen Modals)
-- Zustand (Gerenciamento de Estado)
-- React Query (Data Fetching & Cache)
-- React Native Maps
-
-**Backend (API Core):**
-- Python 3.11 / Django 5.x
-- Django REST Framework (DRF)
-- Django Channels (WebSockets / ASGI)
-- Celery + Redis (Processamento Assíncrono e Channel Layer)
-- Autenticação via JWT (SimpleJWT)
-
-**Banco de Dados & Infra:**
-- PostgreSQL 16 com extensão **PostGIS 3.4** (Para funções como `ST_DWithin`)
-- AWS S3 / Google Cloud Storage (Para assets)
-- Railway / GCP Cloud Run (Deploy)
-
-## 📱 Telas do Aplicativo
-
-*(Em breve: Adicionaremos aqui GIFs e Screenshots das telas de Feed, Mapa, Perfil e Fluxo de Checkout em Dark Mode e Light Mode).*
-
-## ⚙️ Como rodar o projeto localmente
-
-### 1. Backend (Django)
-```bash
-cd backend
-python -m venv venv
-# Ative o venv:
-# Windows: .\venv\Scripts\activate | Mac/Linux: source venv/bin/activate
-pip install -r requirements/dev.txt
-
-# Copie o .env e rode as migrations (necessário SQLite compatível com Spatialite ou PostgreSQL/PostGIS)
-python manage.py migrate
-python manage.py runserver
-```
-
-### 2. Frontend (React Native / Expo)
-```bash
-cd mobile
-npm install
-npx expo start
-```
-*Utilize o aplicativo **Expo Go** no seu celular para ler o QR Code ou utilize um emulador Android/iOS.*
 
 ---
 
-<div align="center">
-  <i>Construído com código limpo, arquitetura escalável e foco na experiência do usuário.</i><br>
-  Desenvolvido sob o protocolo V.L.A.E.G.S para o ecossistema brasileiro.
-</div>
+## O que é
+
+Marketplace de locação por proximidade (P2P e lojistas). Quem tem uma furadeira parada anuncia;
+quem precisa dela por dois dias encontra no mapa, aluga e devolve. O valor do aluguel só é cobrado
+quando a locação termina, e a caução fica apenas **autorizada** no cartão até a devolução.
+
+É um projeto de portfólio: o objetivo é um **MVP que funciona de ponta a ponta**, não um produto publicado.
+
+## O que funciona (e está testado)
+
+| Fluxo | Como funciona |
+|---|---|
+| Cadastro e login | JWT por e-mail; o app guarda os tokens no SecureStore e renova o access token sozinho (refresh rotacionado com blacklist) |
+| Anunciar item | Item com foto (upload multipart), categoria e localização; itens da camada **PRO** só aparecem depois de aprovados no admin |
+| Achar por perto | `GET /catalog/itens/proximos/?lat&lng&raio_km` com `ST_DWithin` no PostGIS (no SQLite de dev, a distância é calculada em Python) |
+| Alugar | O backend cria um **PaymentIntent com captura manual** (diárias + taxa + caução) e o app confirma com a **PaymentSheet** do Stripe |
+| Entregar → devolver → concluir | Máquina de estados (`django-fsm`); ao concluir, captura **só o devido** e o Stripe libera a caução na mesma operação |
+| Chat | WebSocket (Django Channels) autenticado por JWT, com histórico cifrado em repouso (Fernet) e fallback REST |
+| Impacto ambiental | CO₂ evitado por locação e selos ESG calculados ao concluir |
+
+**Números:** 110 testes no backend (API, permissões, WebSocket, fluxo de pagamento com Stripe mockado)
+e o app compila sem erros de TypeScript. A CI roda tudo a cada push e confere as migrações num PostGIS de verdade.
+
+## Arquitetura
+
+```
+App (Expo / React Native)                     Backend (Django 6 + DRF, ASGI)
+  React Query + Zustand  ── HTTPS/JWT ──►      /api/v1/  catalog · rentals · payments · chat · esg · users
+  PaymentSheet (Stripe)                         Channels  /ws/chat/<locacao>/?token=…
+  WebSocket do chat      ── WS/JWT ────►        Celery    expira solicitações sem pagamento (beat, a cada hora)
+                                                    │
+                          PostgreSQL + PostGIS ◄────┤──► Redis (channel layer, broker, cache)
+                                                    └──► Stripe (PaymentIntent manual, Connect opcional)
+```
+
+Decisões que valem a explicação:
+
+- **Um PaymentIntent, captura parcial.** Autoriza diárias + taxa + caução; na conclusão captura só diárias + taxa.
+  O restante (a caução) é liberado pelo próprio Stripe. Assim não existe "capturar e depois cancelar".
+- **Valores numa fonte só.** `LocacaoService` calcula diárias e taxas (lidas do settings), grava na locação, e o
+  pagamento usa esses valores. Não há uma segunda conta paralela.
+- **Mesmas migrações para SQLite e PostGIS.** O `PointField` de `apps/core/geo_compat.py` se descreve igual
+  nos dois modos; a CI verifica com `makemigrations --check` contra um PostGIS.
+- **Permissões por dono.** Editar ou apagar item de outra pessoa devolve 404 (não revela que existe);
+  avaliação só do locatário e só de locação concluída.
+
+## Como rodar
+
+### Backend (Docker)
+
+```bash
+cp .env.example .env        # coloque as chaves de TESTE do Stripe (sk_test_..., pk_test_...)
+docker compose up --build   # PostGIS + Redis + API + Celery em http://localhost:8000
+docker compose exec api python manage.py createsuperuser
+docker compose exec api python manage.py seed_fake_data   # opcional: itens de exemplo
+```
+
+### Backend (sem Docker, SQLite)
+
+```bash
+cd backend
+python -m venv venv && venv/Scripts/activate      # Linux/Mac: source venv/bin/activate
+pip install -r requirements/dev.txt
+cp .env.example .env                               # precisa de DJANGO_SECRET_KEY
+python manage.py migrate && python manage.py seed_selos
+python manage.py runserver 0.0.0.0:8000
+python -m pytest                                   # testes
+```
+
+### App (Expo Go)
+
+```bash
+cd mobile
+cp .env.example .env    # EXPO_PUBLIC_API_URL=http://SEU_IP_NA_REDE:8000 e a pk_test do Stripe
+npm install
+npx expo start          # abra no Expo Go pelo QR code
+```
+
+No celular físico, a API precisa estar acessível pelo IP do computador na rede (não `localhost`).
+Para pagar, use o cartão de teste do Stripe `4242 4242 4242 4242`, qualquer data futura e qualquer CVC.
+
+## Limitações conhecidas
+
+- **Contestação sem mediação:** uma locação contestada não tem fluxo de resolução nem captura da caução.
+- **KYC manual:** documentos são enviados, mas a aprovação é pelo admin e não bloqueia ações.
+- **Push e e-mail:** notificações ficam no banco; não há envio por FCM.
+- **Datas digitadas** no checkout (AAAA-MM-DD), sem calendário.
+- O app ainda não tem testes automatizados nem lint; a garantia hoje é o TypeScript estrito e o bundle de build.
+- O ambiente Docker foi escrito e validado em sintaxe, mas a CI é quem roda o PostGIS de verdade.
+
+## Stack
+
+**Backend:** Python 3.12, Django 6, Django REST Framework, SimpleJWT, Django Channels, Celery, PostgreSQL/PostGIS,
+Redis, Stripe, django-fsm, pytest.
+**App:** React Native (Expo SDK 54), TypeScript, React Navigation, TanStack Query, Zustand, react-native-maps,
+@stripe/stripe-react-native.

@@ -75,11 +75,14 @@ CACHES = {
 # Channels — Em memória para desenvolvimento
 # ==============================================================================
 
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer",
-    },
-}
+if os.environ.get("CHANNELS_REDIS", "").lower() not in ("1", "true"):
+    # Dev local simples: camada em memória, válida para um único processo.
+    # O docker compose define CHANNELS_REDIS=true e vale a configuração do base.py (Redis).
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        },
+    }
 
 # ==============================================================================
 # Logging — Mais verboso em desenvolvimento

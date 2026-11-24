@@ -4,7 +4,7 @@ Testes do WebSocket do chat: autenticação JWT e protocolo de eventos.
 from asgiref.sync import sync_to_async
 from channels.routing import URLRouter
 from channels.testing import WebsocketCommunicator
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, override_settings
 from rest_framework_simplejwt.tokens import AccessToken
 
 from apps.chat.middleware import JWTAuthMiddleware
@@ -21,6 +21,8 @@ def _conectar(locacao_id, usuario=None):
     return WebsocketCommunicator(aplicacao, url)
 
 
+# Camada em memória: o teste não depende de um Redis rodando
+@override_settings(CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}})
 class ChatConsumerTests(TransactionTestCase):
     async def test_sem_token_a_conexao_e_recusada(self):
         locacao = await sync_to_async(LocacaoFactory)()

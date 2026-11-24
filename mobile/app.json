@@ -1,15 +1,18 @@
 {
   "expo": {
-    "name": "mobile",
-    "slug": "mobile",
+    "name": "Aloogaí",
+    "slug": "aloogai",
+    "scheme": "aloogai",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "br.com.aloogai.app"
     },
     "android": {
+      "package": "br.com.aloogai.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -25,7 +28,26 @@
       "expo-secure-store",
       "expo-font",
       "expo-splash-screen",
-      "@stripe/stripe-react-native"
+      [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "",
+          "enableGooglePay": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "O Aloogaí usa sua localização para mostrar itens para alugar perto de você."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "O Aloogaí acessa suas fotos para você adicionar imagens aos itens que anuncia.",
+          "cameraPermission": false
+        }
+      ]
     ]
   }
 }

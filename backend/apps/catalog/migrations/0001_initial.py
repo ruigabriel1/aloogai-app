@@ -69,7 +69,7 @@ class Migration(migrations.Migration):
                 ('status', models.CharField(choices=[('RASCUNHO', 'Rascunho'), ('ATIVO', 'Ativo'), ('PAUSADO', 'Pausado'), ('INATIVO', 'Inativo')], default='RASCUNHO', max_length=10, verbose_name='Status')),
                 ('preco_diaria', models.DecimalField(decimal_places=2, max_digits=10, verbose_name='Preço por diária')),
                 ('valor_caucao', models.DecimalField(decimal_places=2, max_digits=10, verbose_name='Valor da caução')),
-                ('localizacao', apps.core.geo_compat.PointField(blank=True, default='', max_length=100, verbose_name='Localização')),
+                ('localizacao', apps.core.geo_compat.PointField(geography=True, verbose_name='Localização')),
                 ('endereco_texto', models.CharField(blank=True, help_text='Endereço legível para exibição.', max_length=255, verbose_name='Endereço')),
                 ('requer_licenca', models.BooleanField(default=False, verbose_name='Requer licença')),
                 ('documento_licenca', models.FileField(blank=True, null=True, upload_to='licencas/%Y/%m/', verbose_name='Documento de licença')),

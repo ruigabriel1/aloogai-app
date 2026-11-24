@@ -317,6 +317,15 @@ CELERY_TASK_SOFT_TIME_LIMIT = 240  # 4 minutos (aviso antes do hard limit)
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
+# Tarefas periódicas (rodam no processo "celery beat")
+CELERY_BEAT_SCHEDULE = {
+    # Solicitações sem pagamento há mais de 24 h são canceladas e a autorização liberada
+    "expirar-solicitacoes-pendentes": {
+        "task": "rentals.expirar_solicitacoes_pendentes",
+        "schedule": 60 * 60,  # a cada hora
+    },
+}
+
 # ==============================================================================
 # Redis — Cache
 # ==============================================================================

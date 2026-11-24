@@ -1,0 +1,70 @@
+# Ambiente completo do Aloogaí: PostGIS + Redis + API (ASGI) + Celery.
+#
+#   cp .env.example .env      # preencha as chaves de teste do Stripe
+#   docker compose up --build
+#
+# API em http://localhost:8000/api/v1/ — admin em http://localhost:8000/admin/
+
+x-backend: &backend
+  build: ./backend
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    DJANGO_SETTINGS_MODULE: config.settings.dev
+    DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-chave-somente-para-desenvolvimento}
+    USE_SQLITE: "False"
+    POSTGRES_DB: aloogai
+    POSTGRES_USER: aloogai
+    POSTGRES_PASSWORD: aloogai
+    POSTGRES_HOST: db
+    POSTGRES_PORT: "5432"
+    REDIS_URL: redis://redis:6379/0
+    CHANNELS_REDIS: "true"
+    CELERY_BROKER_URL: redis://redis:6379/1
+    CELERY_RESULT_BACKEND: redis://redis:6379/2
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_started
+  volumes:
+    - media:/app/media
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: aloogai
+      POSTGRES_USER: aloogai
+      POSTGRES_PASSWORD: aloogai
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aloogai -d aloogai"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+
+  api:
+    <<: *backend
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py seed_selos &&
+             uvicorn config.asgi:application --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+
+  worker:
+    <<: *backend
+    command: celery -A config worker -l info
+
+  beat:
+    <<: *backend
+    command: celery -A config beat -l info
+
+volumes:
+  pgdata:
+  media:

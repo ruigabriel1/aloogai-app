@@ -85,7 +85,7 @@ class Migration(migrations.Migration):
                 ('cidade', models.CharField(max_length=100, verbose_name='Cidade')),
                 ('estado', models.CharField(max_length=2, verbose_name='Estado')),
                 ('cep', models.CharField(max_length=9, verbose_name='CEP')),
-                ('localizacao', apps.core.geo_compat.PointField(blank=True, default='', max_length=100, verbose_name='Localização')),
+                ('localizacao', apps.core.geo_compat.PointField(geography=True, verbose_name='Localização')),
                 ('is_principal', models.BooleanField(default=False, verbose_name='Endereço principal')),
                 ('created_at', models.DateTimeField(auto_now_add=True, verbose_name='Criado em')),
                 ('usuario', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='enderecos', to=settings.AUTH_USER_MODEL, verbose_name='Usuário')),

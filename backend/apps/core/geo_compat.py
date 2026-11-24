@@ -4,6 +4,9 @@ Módulo de compatibilidade para campos geoespaciais.
 Com `settings.USE_SQLITE = True` (padrão só no dev local), usa campos de texto no lugar
 dos campos do PostGIS. Em qualquer outro caso, usa o PostGIS de verdade e um erro de
 GDAL/GEOS aparece na hora, em vez de cair em silêncio para o modo texto.
+
+O PointField daqui se descreve igual nos dois modos (mesmo caminho e mesmos kwargs no
+`deconstruct`), então um único conjunto de migrações serve para SQLite e PostGIS.
 """
 
 from django.conf import settings
@@ -16,7 +19,9 @@ if not USE_SQLITE:
     from django.contrib.gis.measure import D  # noqa: F401
 
     HAS_GIS = True
-    PointField = gis_models.PointField
+
+    class PointField(gis_models.PointField):
+        """PointField do PostGIS, com caminho estável para as migrações."""
 
 else:
     from django.db import models
@@ -29,14 +34,26 @@ else:
         Armazena o ponto como texto WKT: 'POINT (lng lat)'.
         """
 
-        def __init__(self, *args, **kwargs):
-            kwargs.pop("geography", None)
-            kwargs.pop("spatial_index", None)
-            kwargs.pop("srid", None)
+        def __init__(self, *args, geography=False, spatial_index=True, srid=4326, **kwargs):
+            self._geo = {"geography": geography, "spatial_index": spatial_index, "srid": srid}
+            self._injetados = [k for k in ("max_length", "blank", "default") if k not in kwargs]
             kwargs.setdefault("max_length", 100)
             kwargs.setdefault("blank", True)
             kwargs.setdefault("default", "")
             super().__init__(*args, **kwargs)
+
+        def deconstruct(self):
+            """Descreve-se como o PointField do GIS descreveria (ver GeometryField.deconstruct)."""
+            name, path, args, kwargs = super().deconstruct()
+            for chave in self._injetados:
+                kwargs.pop(chave, None)
+            if self._geo["geography"]:
+                kwargs["geography"] = True
+            if self._geo["srid"] != 4326:
+                kwargs["srid"] = self._geo["srid"]
+            if not self._geo["spatial_index"]:
+                kwargs["spatial_index"] = False
+            return name, path, args, kwargs
 
     class Point:
         """Fallback para Point (x = longitude, y = latitude)."""
