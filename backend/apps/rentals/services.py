@@ -17,8 +17,11 @@ from apps.rentals.models import Locacao, StatusLocacao
 # Constantes de negócio
 # ──────────────────────────────────────────────────────────────
 
-TAXA_SERVICO_LOCATARIO = Decimal("0.10")   # 10 % sobre diárias
-TAXA_SUCESSO_LOCADOR = Decimal("0.15")     # 15 % sobre valor recebido
+def _taxa(nome: str, padrao: str) -> Decimal:
+    """Lê a taxa do settings (ALOOGAI_TAXA_*), para não haver dois valores no código."""
+    from django.conf import settings
+
+    return Decimal(str(getattr(settings, nome, padrao)))
 
 
 class LocacaoService:
@@ -88,10 +91,10 @@ class LocacaoService:
         valor_diarias = (preco_diaria * num_diarias).quantize(
             centavos, rounding=ROUND_HALF_UP
         )
-        valor_taxa_servico = (valor_diarias * TAXA_SERVICO_LOCATARIO).quantize(
+        valor_taxa_servico = (valor_diarias * _taxa("ALOOGAI_TAXA_SERVICO_LOCATARIO", "0.10")).quantize(
             centavos, rounding=ROUND_HALF_UP
         )
-        valor_taxa_sucesso = (valor_diarias * TAXA_SUCESSO_LOCADOR).quantize(
+        valor_taxa_sucesso = (valor_diarias * _taxa("ALOOGAI_TAXA_SUCESSO_LOCADOR", "0.15")).quantize(
             centavos, rounding=ROUND_HALF_UP
         )
         total_locatario = valor_diarias + valor_taxa_servico

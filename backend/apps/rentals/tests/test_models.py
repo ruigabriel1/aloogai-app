@@ -114,14 +114,17 @@ class TestFSMTransicoesInvalidas(TestCase):
         with self.assertRaises(TransitionNotAllowed):
             locacao.concluir()
 
-    def test_cancelar_apos_caucao_retida_deve_falhar(self):
-        """Cancelar após caução retida NÃO é permitido pela FSM."""
+    def test_cancelar_apos_caucao_retida_e_permitido(self):
+        """
+        Antes da entrega, o locatário pode desistir mesmo com o cartão autorizado
+        (a view cancela a autorização no Stripe antes da transição).
+        """
         locacao = LocacaoFactory()
         locacao.reter_caucao(caucao_auth_id='pi_test_123')
         locacao.save()
 
-        with self.assertRaises(TransitionNotAllowed):
-            locacao.cancelar()
+        locacao.cancelar()
+        self.assertEqual(locacao.status, StatusLocacao.CANCELADO)
 
     def test_cancelar_apos_ativo_deve_falhar(self):
         """Cancelar após ATIVO não é permitido."""

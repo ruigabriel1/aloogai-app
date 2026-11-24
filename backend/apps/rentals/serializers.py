@@ -40,19 +40,12 @@ class LocacaoCreateSerializer(serializers.ModelSerializer):
     O locatário é inferido do request (usuário autenticado).
     """
 
-    payment_method_id = serializers.CharField(
-        write_only=True,
-        required=True,
-        help_text="ID do método de pagamento Stripe (pm_xxx).",
-    )
-
     class Meta:
         model = Locacao
         fields = [
             "item",
             "data_inicio",
             "data_fim",
-            "payment_method_id",
         ]
 
     def validate(self, attrs: dict) -> dict:
@@ -70,6 +63,12 @@ class LocacaoCreateSerializer(serializers.ModelSerializer):
         erros_datas = LocacaoService.validar_datas(data_inicio, data_fim)
         if erros_datas:
             raise serializers.ValidationError({"datas": erros_datas})
+
+        # Só itens publicados e aprovados podem ser alugados
+        if not item.visivel_no_mapa:
+            raise serializers.ValidationError(
+                {"item": "Este item não está disponível para locação."}
+            )
 
         # Validar que locatário não é o próprio locador
         request = self.context.get("request")
@@ -108,7 +107,6 @@ class LocacaoCreateSerializer(serializers.ModelSerializer):
         fluxo de pagamento (implementação completa no PaymentsService).
         """
         # Remover campos não-modelo
-        validated_data.pop("payment_method_id", None)
         validated_data.pop("numero_diarias", None)
 
         # Definir locatário

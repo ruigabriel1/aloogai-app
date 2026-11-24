@@ -18,7 +18,8 @@ import logging
 
 from django.db import transaction
 from django.db.models import Q
-from django_fsm import TransitionNotAllowed
+import stripe
+from django_fsm import TransitionNotAllowed, can_proceed
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -72,48 +73,63 @@ class LocacaoViewSet(viewsets.ModelViewSet):
         return qs.select_related('item', 'item__locador', 'locatario').prefetch_related("timeline")
 
     @transaction.atomic
-    def perform_create(self, serializer):
+    def create(self, request, *args, **kwargs):
         """
-        Cria a locação e inicia o fluxo de pré-autorização Stripe.
+        Cria a locação (SOLICITADO) e a pré-autorização no Stripe, numa transação só.
 
-        Fluxo:
-            1. Salva a locação com status SOLICITADO
-            2. Chama StripeService.criar_pre_autorizacao()
-            3. Salva payment_intent_id na locação
-            4. Transiciona para CAUCAO_RETIDA
+        A resposta traz `pagamento.client_secret` para o app abrir a PaymentSheet.
+        Se o Stripe falhar, nada é gravado e a resposta é 502 (sem locação órfã).
         """
-        locacao = serializer.save()
-        logger.info(
-            "Locação %s criada: item=%s, locatário=%s",
-            locacao.id,
-            locacao.item_id,
-            locacao.locatario_id,
-        )
-
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         try:
-            resultado = StripeService.criar_pre_autorizacao(locacao)
-
-            # Atualizar locação com dados do Stripe
-            locacao.payment_intent_id = resultado['payment_intent_id']
-
-            # Transicionar FSM: SOLICITADO → CAUCAO_RETIDA
-            locacao.reter_caucao(
-                caucao_auth_id=resultado['payment_intent_id']
+            with transaction.atomic():
+                locacao = serializer.save()
+                pagamento = StripeService.criar_pre_autorizacao(locacao)
+                locacao.payment_intent_id = pagamento["payment_intent_id"]
+                locacao.save(update_fields=["payment_intent_id"])
+        except stripe.StripeError as e:
+            logger.error("Stripe recusou a pré-autorização: %s", e)
+            return Response(
+                {"erro": "Não foi possível iniciar o pagamento. Tente novamente."},
+                status=status.HTTP_502_BAD_GATEWAY,
             )
-            locacao.save()
 
-            logger.info(
-                "Locação %s: pré-autorização criada e caução retida (PI: %s)",
-                locacao.id,
-                resultado['payment_intent_id'],
+        logger.info("Locação %s criada (PI %s)", locacao.id, locacao.payment_intent_id)
+        dados = LocacaoDetailSerializer(locacao, context={"request": request}).data
+        dados["pagamento"] = {
+            "client_secret": pagamento["client_secret"],
+            "payment_intent_id": pagamento["payment_intent_id"],
+        }
+        return Response(dados, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="confirmar-pagamento")
+    def confirmar_pagamento(self, request, pk=None):
+        """
+        Confere no Stripe se o cartão foi autorizado e, se sim, passa para CAUCAO_RETIDA.
+
+        O app chama depois da PaymentSheet; o webhook faz o mesmo. É idempotente.
+        """
+        locacao = self.get_object()
+        if request.user != locacao.locatario:
+            return Response(
+                {"erro": "Apenas o locatário confirma o pagamento."},
+                status=status.HTTP_403_FORBIDDEN,
             )
-        except Exception as e:
-            logger.error(
-                "Erro na pré-autorização da locação %s: %s",
-                locacao.id, str(e)
+        try:
+            autorizado = StripeService.sincronizar_pagamento(locacao)
+        except stripe.StripeError as e:
+            logger.error("Erro ao consultar pagamento da locação %s: %s", locacao.id, e)
+            return Response(
+                {"erro": "Não foi possível consultar o pagamento."},
+                status=status.HTTP_502_BAD_GATEWAY,
             )
-            # A locação permanece como SOLICITADO para retry
-            # O locatário verá o status e poderá tentar novamente
+        if not autorizado:
+            return Response(
+                {"erro": "O pagamento ainda não foi autorizado."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(LocacaoDetailSerializer(locacao).data, status=status.HTTP_200_OK)
 
     # ──────────────────────────────────────────────────────────
     # Ações de transição FSM
@@ -142,8 +158,6 @@ class LocacaoViewSet(viewsets.ModelViewSet):
             metodo = getattr(locacao, metodo_transicao)
             if metodo_transicao == "contestar":
                 metodo(observacao=observacao)
-            elif metodo_transicao == "reter_caucao":
-                metodo(caucao_auth_id=request.data.get("caucao_auth_id", ""))
             else:
                 metodo()
 
@@ -218,35 +232,43 @@ class LocacaoViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="concluir")
     def concluir(self, request, pk=None):
         """
-        Conclui a locação: captura diárias e libera caução.
+        Conclui a locação: captura o valor devido e libera a caução.
 
-        Transição: DEVOLVIDO → CONCLUIDO.
-        Fluxo:
-            1. Captura pagamento das diárias via Stripe
-            2. Libera pré-autorização da caução
-            3. Transiciona FSM para CONCLUIDO
+        Transição: DEVOLVIDO → CONCLUIDO. Só o locador conclui.
+        Estado e papel são validados ANTES de mexer no dinheiro; a captura e a
+        transição acontecem juntas (se o Stripe falhar, a locação não muda).
         """
         locacao = self.get_object()
 
-        # Capturar pagamento e liberar caução antes da transição
-        try:
-            if locacao.payment_intent_id:
-                StripeService.capturar_pagamento_diarias(locacao)
-            if locacao.caucao_auth_id:
-                StripeService.liberar_caucao(locacao)
-        except Exception as e:
-            logger.error(
-                "Erro financeiro ao concluir locação %s: %s",
-                locacao.id, str(e)
-            )
+        if request.user != locacao.locador:
             return Response(
-                {"erro": f"Erro ao processar pagamento: {str(e)}"},
+                {"erro": "Apenas o locador pode concluir a locação."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not can_proceed(locacao.concluir):
+            return Response(
+                {
+                    "erro": "A locação só pode ser concluída depois da devolução "
+                    f"(status atual: '{locacao.get_status_display()}')."
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        try:
+            with transaction.atomic():
+                if locacao.payment_intent_id:
+                    StripeService.capturar_valor_devido(locacao)
+                locacao.concluir()
+                locacao.save()
+        except stripe.StripeError as e:
+            logger.error("Erro financeiro ao concluir locação %s: %s", locacao.id, e)
+            return Response(
+                {"erro": "Não foi possível processar o pagamento. Tente novamente."},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
-        return self._executar_transicao(
-            request, pk, "concluir", "Concluir Locação"
-        )
+        logger.info("Locação %s concluída por %s", locacao.id, request.user.id)
+        return Response(LocacaoDetailSerializer(locacao).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="contestar")
     def contestar(self, request, pk=None):
@@ -278,6 +300,19 @@ class LocacaoViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        if not can_proceed(locacao.cancelar):
+            return Response(
+                {"erro": f"Não é possível cancelar no status '{locacao.get_status_display()}'."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        try:
+            StripeService.cancelar_pre_autorizacao(locacao)
+        except stripe.StripeError as e:
+            logger.error("Erro ao cancelar autorização da locação %s: %s", locacao.id, e)
+            return Response(
+                {"erro": "Não foi possível cancelar o pagamento. Tente novamente."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
         return self._executar_transicao(
             request, pk, "cancelar", "Cancelar Locação"
         )

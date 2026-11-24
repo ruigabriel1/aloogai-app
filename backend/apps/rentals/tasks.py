@@ -47,6 +47,9 @@ def expirar_solicitacoes_pendentes():
 
     for locacao in locacoes_pendentes:
         try:
+            from apps.payments.services import StripeService
+
+            StripeService.cancelar_pre_autorizacao(locacao)
             locacao.cancelar()
             locacao.save()
             expiradas += 1

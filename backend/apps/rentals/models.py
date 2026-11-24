@@ -270,7 +270,7 @@ class Locacao(models.Model):
 
     @transition(
         field=status,
-        source=StatusLocacao.SOLICITADO,
+        source=[StatusLocacao.SOLICITADO, StatusLocacao.CAUCAO_RETIDA],
         target=StatusLocacao.CANCELADO,
     )
     def cancelar(self):

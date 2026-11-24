@@ -6,7 +6,7 @@ captura parcial (diárias), liberação de caução e webhooks.
 """
 
 import logging
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 import stripe
 from django.conf import settings
@@ -131,195 +131,159 @@ class StripeService:
             raise
 
     # ─────────────────────────────────────────────
-    # Pré-Autorização (Caução Digital)
+    # Pagamento da Locação (PaymentIntent com captura manual)
     # ─────────────────────────────────────────────
+    #
+    # Fluxo (os valores vêm da própria Locacao, calculados pelo LocacaoService):
+    #   1. criar_pre_autorizacao: autoriza diárias + taxa de serviço + caução no cartão
+    #      (nada é cobrado ainda). O app confirma com a PaymentSheet usando o client_secret.
+    #   2. sincronizar_pagamento: quando o Stripe diz "requires_capture" (webhook ou
+    #      consulta direta), a locação passa de SOLICITADO para CAUCAO_RETIDA.
+    #   3. capturar_valor_devido (ao concluir): captura só diárias + taxa. O Stripe
+    #      libera o restante da autorização (a caução) automaticamente.
+    #   4. cancelar_pre_autorizacao: cancela a autorização inteira (locação cancelada).
+
+    @staticmethod
+    def _centavos(valor) -> int:
+        """Converte reais (Decimal) para centavos, arredondando meio para cima."""
+        return int((Decimal(valor) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+    @staticmethod
+    def _conta_destino(locacao) -> str | None:
+        """Conta Connect do locador, se o onboarding estiver completo (senão, sem repasse)."""
+        locador = locacao.item.locador
+        if locador.stripe_account_id and locador.stripe_onboarding_complete:
+            return locador.stripe_account_id
+        return None
 
     @staticmethod
     def criar_pre_autorizacao(locacao):
         """
-        Cria uma pré-autorização (PaymentIntent com captura manual)
-        para o valor total: diárias + caução.
+        Cria o PaymentIntent (captura manual) para diárias + taxa + caução.
 
-        O valor fica retido no cartão do locatário mas NÃO é cobrado.
-        A captura só acontece quando o locador confirmar a entrega.
+        Returns:
+            dict com payment_intent_id e client_secret (para a PaymentSheet do app).
         """
-        taxa_servico = settings.ALOOGAI_TAXA_SERVICO_LOCATARIO
-        taxa_sucesso = settings.ALOOGAI_TAXA_SUCESSO_LOCADOR
+        valor_autorizado = locacao.total_locatario + locacao.valor_caucao
+        params = {
+            "amount": StripeService._centavos(valor_autorizado),
+            "currency": "brl",
+            "capture_method": "manual",
+            "payment_method_types": ["card"],
+            "metadata": {
+                "aloogai_locacao_id": str(locacao.id),
+                "aloogai_item_id": str(locacao.item_id),
+                "valor_devido": str(locacao.total_locatario),
+                "valor_caucao": str(locacao.valor_caucao),
+            },
+        }
+        destino = StripeService._conta_destino(locacao)
+        if destino:
+            params["transfer_data"] = {"destination": destino}
 
-        # Cálculos financeiros
-        dias = (locacao.data_fim - locacao.data_inicio).days
-        if dias < 1:
-            dias = 1
+        payment_intent = stripe.PaymentIntent.create(
+            **params, idempotency_key=f"aloogai-preauth-{locacao.id}",
+        )
+        logger.info(
+            "Pré-autorização criada: %s (R$ %s) para locação %s",
+            payment_intent.id, valor_autorizado, locacao.id,
+        )
 
-        valor_diarias = locacao.item.preco_diaria * dias
-        valor_taxa_servico = valor_diarias * Decimal(str(taxa_servico))
-        total_locatario = valor_diarias + valor_taxa_servico + locacao.item.valor_caucao
-
-        # Stripe trabalha em centavos
-        total_centavos = int(total_locatario * 100)
-
-        # Taxa de sucesso do Aloogaí (retida do locador no split)
-        taxa_sucesso_centavos = int(valor_diarias * Decimal(str(taxa_sucesso)) * 100)
-
-        try:
-            payment_intent = stripe.PaymentIntent.create(
-                amount=total_centavos,
-                currency='brl',
-                capture_method='manual',  # Captura tardia (caução)
-                payment_method_types=['card'],
-                transfer_data={
-                    'destination': locacao.item.locador.stripe_account_id,
-                },
-                application_fee_amount=int(valor_taxa_servico * 100) + taxa_sucesso_centavos,
-                metadata={
-                    'aloogai_locacao_id': str(locacao.id),
-                    'aloogai_item_id': str(locacao.item.id),
-                    'aloogai_locador_id': str(locacao.item.locador.id),
-                    'aloogai_locatario_id': str(locacao.locatario.id),
-                    'valor_diarias': str(valor_diarias),
-                    'valor_caucao': str(locacao.item.valor_caucao),
-                    'valor_taxa_servico': str(valor_taxa_servico),
-                    'dias': str(dias),
-                },
-            )
-
-            logger.info(
-                'Pré-autorização criada: %s (R$ %.2f) para locação %s',
-                payment_intent.id, total_locatario, locacao.id
-            )
-
-            # Registrar transação de pré-autorização (diárias)
-            StripeService._registrar_transacao(
-                locacao=locacao,
-                tipo='PRE_AUTH',
-                valor=valor_diarias + valor_taxa_servico,
-                stripe_payment_intent_id=payment_intent.id,
-                status_transacao='PENDENTE',
-                metadata={
-                    'dias': dias,
-                    'valor_taxa_servico': str(valor_taxa_servico),
-                },
-            )
-
-            # Registrar transação de pré-autorização (caução)
-            StripeService._registrar_transacao(
-                locacao=locacao,
-                tipo='CAUCAO_PRE_AUTH',
-                valor=locacao.item.valor_caucao,
-                stripe_payment_intent_id=payment_intent.id,
-                status_transacao='PENDENTE',
-            )
-
-            return {
-                'payment_intent_id': payment_intent.id,
-                'client_secret': payment_intent.client_secret,
-                'valor_diarias': valor_diarias,
-                'valor_taxa_servico': valor_taxa_servico,
-                'valor_caucao': locacao.item.valor_caucao,
-                'total_locatario': total_locatario,
-            }
-
-        except stripe.error.StripeError as e:
-            logger.error('Erro ao criar pré-autorização: %s', str(e))
-            raise
-
-    # ─────────────────────────────────────────────
-    # Captura Parcial (Somente Diárias)
-    # ─────────────────────────────────────────────
+        StripeService._registrar_transacao(
+            locacao=locacao, tipo="PRE_AUTH", valor=locacao.total_locatario,
+            stripe_payment_intent_id=payment_intent.id,
+        )
+        StripeService._registrar_transacao(
+            locacao=locacao, tipo="CAUCAO_PRE_AUTH", valor=locacao.valor_caucao,
+            stripe_payment_intent_id=payment_intent.id,
+        )
+        return {
+            "payment_intent_id": payment_intent.id,
+            "client_secret": payment_intent.client_secret,
+        }
 
     @staticmethod
-    def capturar_pagamento_diarias(locacao):
+    def sincronizar_pagamento(locacao, status_stripe: str | None = None) -> bool:
         """
-        Captura apenas o valor das diárias + taxas.
-        A caução permanece retida como pré-autorização separada.
+        Passa a locação para CAUCAO_RETIDA quando o cartão foi autorizado.
 
-        Regra de negócio: Só é chamado quando o locador confirma
-        a entrega do item (transição para ATIVO).
+        Idempotente: pode ser chamado pelo webhook e pelo app (depois da PaymentSheet).
+        Se `status_stripe` não vier, consulta o PaymentIntent no Stripe.
+
+        Returns:
+            True se a locação está com o pagamento autorizado (ou já passou dessa etapa).
         """
-        try:
-            taxa_servico = settings.ALOOGAI_TAXA_SERVICO_LOCATARIO
+        from apps.payments.models import TransacaoStripe
+        from apps.rentals.models import StatusLocacao
 
-            dias = (locacao.data_fim - locacao.data_inicio).days
-            if dias < 1:
-                dias = 1
+        if locacao.status != StatusLocacao.SOLICITADO:
+            return locacao.status != StatusLocacao.CANCELADO
+        if not locacao.payment_intent_id:
+            return False
 
-            valor_diarias = locacao.item.preco_diaria * dias
-            valor_taxa_servico = valor_diarias * Decimal(str(taxa_servico))
-            valor_captura = valor_diarias + valor_taxa_servico
+        if status_stripe is None:
+            status_stripe = stripe.PaymentIntent.retrieve(locacao.payment_intent_id).status
+        if status_stripe != "requires_capture":
+            return False
 
-            # Captura parcial — somente as diárias
-            payment_intent = stripe.PaymentIntent.capture(
-                locacao.payment_intent_id,
-                amount_to_capture=int(valor_captura * 100),
-            )
-
-            logger.info(
-                'Captura parcial realizada: %s (R$ %.2f) para locação %s',
-                payment_intent.id, valor_captura, locacao.id
-            )
-
-            # Registrar transação de captura
-            StripeService._registrar_transacao(
-                locacao=locacao,
-                tipo='CAPTURA',
-                valor=valor_captura,
-                stripe_payment_intent_id=payment_intent.id,
-                status_transacao='SUCESSO',
-            )
-
-            return {
-                'status': payment_intent.status,
-                'valor_capturado': valor_captura,
-            }
-
-        except stripe.error.StripeError as e:
-            logger.error('Erro ao capturar diárias: %s', str(e))
-            raise
-
-    # ─────────────────────────────────────────────
-    # Liberação da Caução (Devolução sem danos)
-    # ─────────────────────────────────────────────
+        locacao.reter_caucao(caucao_auth_id=locacao.payment_intent_id)
+        locacao.save()
+        TransacaoStripe.objects.filter(
+            locacao=locacao, tipo__in=["PRE_AUTH", "CAUCAO_PRE_AUTH"],
+        ).update(status="SUCESSO")
+        logger.info("Locação %s: cartão autorizado, caução retida.", locacao.id)
+        return True
 
     @staticmethod
-    def liberar_caucao(locacao):
+    def capturar_valor_devido(locacao):
         """
-        Cancela a pré-autorização da caução, liberando o limite
-        do cartão do locatário sem cobrança.
+        Captura só o valor devido (diárias + taxa de serviço).
 
-        Regra de negócio: Chamado quando a devolução é confirmada
-        sem avarias (transição para CONCLUIDO).
+        A parte não capturada (caução) é liberada pelo Stripe na mesma operação,
+        então não há cancelamento depois. Com repasse Connect, a plataforma retém
+        taxa de serviço + taxa de sucesso como application fee.
         """
-        try:
-            # Se temos um ID de caução separado, cancelar
-            if locacao.caucao_auth_id:
-                payment_intent = stripe.PaymentIntent.cancel(
-                    locacao.caucao_auth_id,
-                )
-                logger.info(
-                    'Caução liberada: %s para locação %s',
-                    locacao.caucao_auth_id, locacao.id
-                )
-
-                # Registrar liberação da caução
-                StripeService._registrar_transacao(
-                    locacao=locacao,
-                    tipo='CAUCAO_LIBERADA',
-                    valor=locacao.valor_caucao,
-                    stripe_payment_intent_id=locacao.caucao_auth_id,
-                    status_transacao='SUCESSO',
-                )
-
-                return {'status': 'cancelada', 'caucao_liberada': True}
-
-            logger.warning(
-                'Nenhum caucao_auth_id encontrado para locação %s',
-                locacao.id
+        payment_intent = stripe.PaymentIntent.retrieve(locacao.payment_intent_id)
+        params = {"amount_to_capture": StripeService._centavos(locacao.total_locatario)}
+        if payment_intent.get("transfer_data"):
+            params["application_fee_amount"] = StripeService._centavos(
+                locacao.valor_taxa_servico + locacao.valor_taxa_sucesso
             )
-            return {'status': 'sem_caucao', 'caucao_liberada': False}
 
-        except stripe.error.StripeError as e:
-            logger.error('Erro ao liberar caução: %s', str(e))
-            raise
+        payment_intent = stripe.PaymentIntent.capture(
+            locacao.payment_intent_id, **params,
+            idempotency_key=f"aloogai-captura-{locacao.id}",
+        )
+        logger.info(
+            "Captura de R$ %s (caução liberada) para locação %s",
+            locacao.total_locatario, locacao.id,
+        )
+        StripeService._registrar_transacao(
+            locacao=locacao, tipo="CAPTURA", valor=locacao.total_locatario,
+            stripe_payment_intent_id=payment_intent.id, status_transacao="SUCESSO",
+        )
+        StripeService._registrar_transacao(
+            locacao=locacao, tipo="CAUCAO_LIBERADA", valor=locacao.valor_caucao,
+            stripe_payment_intent_id=payment_intent.id, status_transacao="SUCESSO",
+        )
+        return {"status": payment_intent.status, "valor_capturado": locacao.total_locatario}
+
+    @staticmethod
+    def cancelar_pre_autorizacao(locacao):
+        """Cancela a autorização inteira (nada é cobrado do locatário)."""
+        if not locacao.payment_intent_id:
+            return
+        try:
+            stripe.PaymentIntent.cancel(locacao.payment_intent_id)
+        except stripe.InvalidRequestError as e:
+            # Já cancelado/expirado no Stripe: para nós o resultado é o mesmo.
+            if getattr(e, "code", "") != "payment_intent_unexpected_state":
+                raise
+            logger.info("PI %s já não estava cancelável: %s", locacao.payment_intent_id, e)
+        StripeService._registrar_transacao(
+            locacao=locacao, tipo="CAUCAO_LIBERADA", valor=locacao.valor_caucao,
+            stripe_payment_intent_id=locacao.payment_intent_id, status_transacao="SUCESSO",
+        )
 
     # ─────────────────────────────────────────────
     # Captura da Caução (Sinistro — Mediação Humana)
@@ -392,6 +356,10 @@ class StripeService:
         Processa eventos recebidos do Stripe via webhook.
         Verifica a assinatura e despacha para o handler correto.
         """
+        if not settings.STRIPE_WEBHOOK_SECRET:
+            # Sem segredo, a assinatura não prova nada: recusar em vez de aceitar forjado.
+            raise ValueError('STRIPE_WEBHOOK_SECRET não configurado.')
+
         try:
             event = stripe.Webhook.construct_event(
                 payload,
@@ -411,6 +379,7 @@ class StripeService:
         logger.info('Webhook recebido: %s', event_type)
 
         handlers = {
+            'payment_intent.amount_capturable_updated': StripeService._handle_autorizado,
             'payment_intent.succeeded': StripeService._handle_payment_succeeded,
             'payment_intent.payment_failed': StripeService._handle_payment_failed,
             'account.updated': StripeService._handle_account_updated,
@@ -423,6 +392,17 @@ class StripeService:
             logger.debug('Evento Stripe não tratado: %s', event_type)
 
         return {'status': 'ok', 'event_type': event_type}
+
+    @staticmethod
+    def _handle_autorizado(data):
+        """Cartão autorizado (requires_capture): a locação passa para CAUCAO_RETIDA."""
+        from apps.rentals.models import Locacao
+
+        locacao = Locacao.objects.filter(payment_intent_id=data["id"]).first()
+        if locacao is None:
+            logger.warning("Webhook: nenhuma locação para o PI %s", data["id"])
+            return
+        StripeService.sincronizar_pagamento(locacao, status_stripe=data.get("status"))
 
     @staticmethod
     def _handle_payment_succeeded(data):

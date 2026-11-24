@@ -119,6 +119,29 @@ export async function executarAcao(id: string, acao: AcaoLocacao): Promise<Locac
   return response.data;
 }
 
-export const rentalsApi = { criarLocacao, listarLocacoes, obterLocacao, executarAcao };
+/**
+ * POST rentals/locacoes/{id}/confirmar-pagamento/ — o backend consulta o Stripe.
+ * Logo após a PaymentSheet o Stripe pode levar um instante: tenta de novo uma vez.
+ */
+export async function confirmarPagamento(id: string): Promise<LocacaoDetalhe> {
+  try {
+    const response = await apiClient.post<LocacaoDetalhe>(`rentals/locacoes/${id}/confirmar-pagamento/`);
+    return response.data;
+  } catch (error) {
+    const status = (error as { response?: { status?: number } })?.response?.status;
+    if (status !== 409) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const response = await apiClient.post<LocacaoDetalhe>(`rentals/locacoes/${id}/confirmar-pagamento/`);
+    return response.data;
+  }
+}
+
+export const rentalsApi = {
+  criarLocacao,
+  listarLocacoes,
+  obterLocacao,
+  executarAcao,
+  confirmarPagamento,
+};
 
 export default rentalsApi;

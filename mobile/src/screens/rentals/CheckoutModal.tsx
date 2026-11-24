@@ -9,7 +9,9 @@ import { TextStyles, FontFamily } from '../../theme/typography';
 import { Spacing, BorderRadius } from '../../theme/spacing';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
-import { criarLocacao } from '../../api/rentals';
+import { useStripe } from '@stripe/stripe-react-native';
+import { criarLocacao, confirmarPagamento, executarAcao } from '../../api/rentals';
+import { mensagemDeErro } from '../../api/auth';
 import { MainStackParamList } from '../../navigation/types';
 
 type CheckoutRouteProp = RouteProp<MainStackParamList, 'CheckoutModal'>;
@@ -28,47 +30,62 @@ export function CheckoutModal(): React.JSX.Element {
   const [dataInicio, setDataInicio] = useState('');
   const [dataFim, setDataFim] = useState('');
 
-  // Lógica de cálculo matemático do aluguel
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
+
+  // Mesmo cálculo do backend (LocacaoService): diárias = fim − início, mínimo 1
   const resumo = useMemo(() => {
     let dias = 0;
-    try {
-      const d1 = new Date(dataInicio);
-      const d2 = new Date(dataFim);
-      if (!isNaN(d1.getTime()) && !isNaN(d2.getTime()) && d2 >= d1) {
-        const diffTime = Math.abs(d2.getTime() - d1.getTime());
-        dias = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // Pelo menos 1 diária
-      }
-    } catch (e) {
-      // Data inválida
+    const d1 = new Date(`${dataInicio}T00:00:00`);
+    const d2 = new Date(`${dataFim}T00:00:00`);
+    if (!isNaN(d1.getTime()) && !isNaN(d2.getTime()) && d2 >= d1) {
+      dias = Math.max(Math.round((d2.getTime() - d1.getTime()) / 86_400_000), 1);
     }
-
     const subtotal = dias * precoDiaria;
-    const taxaServico = subtotal * 0.10; // 10%
-    const totalAPagar = subtotal + taxaServico; // Total cobrado imediatamente
-    // A Caução é pré-autorizada, não cobrada imediatamente
-
+    const taxaServico = Math.round(subtotal * 0.1 * 100) / 100; // 10%
+    const totalAPagar = subtotal + taxaServico; // cobrado ao concluir a locação
     return { dias, subtotal, taxaServico, totalAPagar };
   }, [dataInicio, dataFim, precoDiaria]);
 
   const mutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<'autorizado' | 'cancelado'> => {
       if (resumo.dias <= 0) {
-        throw new Error('Datas inválidas.');
+        throw new Error('Informe as datas no formato AAAA-MM-DD.');
       }
-      return criarLocacao({
-        item: itemId,
-        data_inicio: dataInicio,
-        data_fim: dataFim,
+      // 1) Cria a locação; o backend devolve o client_secret da pré-autorização
+      const locacao = await criarLocacao({ item: itemId, data_inicio: dataInicio, data_fim: dataFim });
+      if (!locacao.pagamento) throw new Error('Pagamento indisponível no momento.');
+
+      // 2) PaymentSheet do Stripe: coleta o cartão e autoriza (nada é cobrado agora)
+      const init = await initPaymentSheet({
+        paymentIntentClientSecret: locacao.pagamento.client_secret,
+        merchantDisplayName: 'Aloogaí',
       });
+      if (init.error) throw new Error(init.error.message);
+      const pagamento = await presentPaymentSheet();
+      if (pagamento.error) {
+        // Usuário fechou a tela ou o cartão foi recusado: desfaz a solicitação
+        await executarAcao(locacao.id, 'cancelar').catch(() => undefined);
+        if (pagamento.error.code === 'Canceled') return 'cancelado';
+        throw new Error(pagamento.error.message);
+      }
+
+      // 3) Confirma no backend (consulta o Stripe e passa para CAUCAO_RETIDA)
+      await confirmarPagamento(locacao.id);
+      return 'autorizado';
     },
-    onSuccess: () => {
-      Alert.alert('Pronto!', 'Sua solicitação de locação foi enviada ao dono do item!');
+    onSuccess: (resultado) => {
       queryClient.invalidateQueries({ queryKey: ['locacoes'] });
-      navigation.navigate('MainTabs'); // Volta pro início ou vai para aba de aluguéis
+      if (resultado === 'cancelado') return;
+      Alert.alert(
+        'Pronto!',
+        'Cartão autorizado. O valor só é cobrado quando a locação for concluída, e a caução é liberada na devolução.',
+      );
+      navigation.navigate('MainTabs');
     },
-    onError: (error: any) => {
-      Alert.alert('Erro', 'Não foi possível solicitar a locação. Verifique as datas (ex: 2026-06-10).');
-    }
+    onError: (error: unknown) => {
+      const texto = error instanceof Error && !('response' in error) ? error.message : undefined;
+      Alert.alert('Erro', texto ?? mensagemDeErro(error, 'Não foi possível solicitar a locação.'));
+    },
   });
 
   return (

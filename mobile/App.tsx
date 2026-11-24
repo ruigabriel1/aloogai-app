@@ -18,6 +18,8 @@ import * as Font from 'expo-font';
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClientProvider } from '@tanstack/react-query';
+import { StripeProvider } from '@stripe/stripe-react-native';
+import { STRIPE_PUBLISHABLE_KEY } from './src/config';
 import { queryClient } from './src/api/queryClient';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet, View } from 'react-native';
@@ -109,6 +111,7 @@ export default function App(): React.JSX.Element | null {
   return (
     <GestureHandlerRootView style={styles.flex}>
       <SafeAreaProvider>
+        <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY}>
         <QueryClientProvider client={queryClient}>
           <NavigationContainer
             theme={isDark ? AloogaiDarkTheme : AloogaiLightTheme}
@@ -119,6 +122,7 @@ export default function App(): React.JSX.Element | null {
             </View>
           </NavigationContainer>
         </QueryClientProvider>
+        </StripeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

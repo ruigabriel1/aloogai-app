@@ -101,7 +101,7 @@ class ContaConectada(models.Model):
     @property
     def esta_ativa(self) -> bool:
         """Retorna True se a conta está ativa e pode receber pagamentos."""
-        return self.status_onboarding == StatusOnboarding.ATIVO
+        return self.status_onboarding in (StatusOnboarding.ATIVO, StatusOnboarding.COMPLETO)
 
 
 # ──────────────────────────────────────────────────────────────

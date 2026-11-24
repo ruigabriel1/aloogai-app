@@ -19,17 +19,39 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
+  Alert,
   Image,
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTheme } from '../../theme';
 import { TextStyles, FontFamily, FontSize } from '../../theme/typography';
 import { Spacing, BorderRadius, Shadows } from '../../theme/spacing';
 import { BrandColors } from '../../theme/colors';
-import { listarLocacoes, type LocacaoResumo, type StatusLocacao } from '../../api/rentals';
+import {
+  executarAcao,
+  listarLocacoes,
+  type AcaoLocacao,
+  type LocacaoResumo,
+  type StatusLocacao,
+} from '../../api/rentals';
+import { mensagemDeErro } from '../../api/auth';
+
+/** Próxima ação disponível para quem está vendo a locação (segue a máquina de estados). */
+function proximaAcao(locacao: LocacaoResumo): { acao: AcaoLocacao; rotulo: string } | null {
+  if (locacao.papel === 'locador') {
+    if (locacao.status === 'CAUCAO_RETIDA') return { acao: 'confirmar-entrega', rotulo: 'Confirmar entrega' };
+    if (locacao.status === 'ATIVO') return { acao: 'confirmar-devolucao', rotulo: 'Confirmar devolução' };
+    if (locacao.status === 'DEVOLVIDO') return { acao: 'concluir', rotulo: 'Concluir e receber' };
+    return null;
+  }
+  if (locacao.status === 'SOLICITADO' || locacao.status === 'CAUCAO_RETIDA') {
+    return { acao: 'cancelar', rotulo: 'Cancelar' };
+  }
+  return null;
+}
 
 /** Mapa de cores por status da locação */
 const STATUS_CONFIG: Record<
@@ -108,6 +130,35 @@ export function RentalsScreen(): React.JSX.Element {
     queryFn: () => listarLocacoes(tabAtiva),
   });
 
+  // Ações da locação (entrega, devolução, conclusão, cancelamento)
+  const queryClient = useQueryClient();
+  const mutacaoAcao = useMutation({
+    mutationFn: ({ id, acao }: { id: string; acao: AcaoLocacao }) => executarAcao(id, acao),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['locacoes'] });
+      queryClient.invalidateQueries({ queryKey: ['perfil'] }); // o score ESG muda ao concluir
+    },
+    onError: (error: unknown) => {
+      Alert.alert('Erro', mensagemDeErro(error, 'Não foi possível atualizar a locação.'));
+    },
+  });
+
+  const confirmarAcao = useCallback(
+    (locacao: LocacaoResumo, acao: AcaoLocacao, rotulo: string) => {
+      const detalhe =
+        acao === 'concluir'
+          ? `O locatário será cobrado em R$ ${locacao.total_locatario} e a caução será liberada.`
+          : acao === 'cancelar'
+            ? 'A autorização no cartão será liberada.'
+            : `${locacao.item_titulo}`;
+      Alert.alert(rotulo, detalhe, [
+        { text: 'Voltar', style: 'cancel' },
+        { text: rotulo, onPress: () => mutacaoAcao.mutate({ id: locacao.id, acao }) },
+      ]);
+    },
+    [mutacaoAcao],
+  );
+
   /** Alterna entre tabs */
   const handleTabPress = useCallback((tab: TabTipo) => {
     setTabAtiva(tab);
@@ -116,6 +167,7 @@ export function RentalsScreen(): React.JSX.Element {
   /** Renderiza um card de locação */
   const renderLocacao = ({ item: locacao }: { item: LocacaoResumo }) => {
     const statusConfig = STATUS_CONFIG[locacao.status];
+    const acao = proximaAcao(locacao);
 
     return (
       <View
@@ -209,6 +261,19 @@ export function RentalsScreen(): React.JSX.Element {
             R$ {locacao.total_locatario}
           </Text>
         </View>
+
+        {/* Próxima etapa da locação */}
+        {acao && (
+          <TouchableOpacity
+            style={[styles.cardRodape, { borderTopColor: colors.border, justifyContent: 'center' }]}
+            disabled={mutacaoAcao.isPending}
+            onPress={() => confirmarAcao(locacao, acao.acao, acao.rotulo)}
+          >
+            <Text style={[styles.cardValor, { color: acao.acao === 'cancelar' ? colors.error : BrandColors.primary }]}>
+              {mutacaoAcao.isPending ? 'Aguarde…' : acao.rotulo}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
     );
   };
