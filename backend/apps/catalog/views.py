@@ -8,6 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter
 from rest_framework.response import Response
 
+from apps.core.permissions import EhDonoOuSomenteLeitura
 from apps.catalog.filters import ItemFilter
 from apps.catalog.models import Avaliacao, Categoria, FotoItem, Item
 from apps.catalog.serializers import (
@@ -51,7 +52,8 @@ class ItemViewSet(viewsets.ModelViewSet):
     Busca por proximidade usa PostGIS ST_DWithin + índice GiST.
     """
 
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly, EhDonoOuSomenteLeitura]
+    campo_dono = 'locador'
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_class = ItemFilter
     ordering_fields = ['preco_diaria', 'avaliacao_media', 'created_at']
@@ -69,28 +71,34 @@ class ItemViewSet(viewsets.ModelViewSet):
         """
         Retorna queryset de itens visíveis.
 
-        Para listagem pública: apenas itens ATIVOS e aprovados.
-        Para o proprietário: inclui seus próprios itens em qualquer status.
+        - Listagem pública e proximidade: só itens ATIVOS e aprovados.
+        - `?meus=true` (logado): todos os itens do próprio usuário, em qualquer status.
+        - Detalhe: itens visíveis, mais os próprios do usuário logado.
+        - Escrita: só os próprios itens (os de outros dão 404, sem revelar que existem).
         """
+        from django.db.models import Q
+
         queryset = Item.objects.select_related(
             'locador', 'categoria',
         ).prefetch_related('fotos')
+        usuario = self.request.user
+        visiveis = Q(status='ATIVO', aprovado_para_uso=True)
 
+        if self.action == 'list' and self._quer_meus_itens():
+            return queryset.filter(locador=usuario)
         if self.action in ('list', 'proximos'):
-            # Listagem pública: só itens visíveis no mapa
-            queryset = queryset.filter(
-                status='ATIVO',
-                aprovado_para_uso=True,
-            )
-        elif self.request.user.is_authenticated and self.action == 'retrieve':
-            # Detalhe: qualquer item ativo OU próprio do usuário
-            from django.db.models import Q
-            queryset = queryset.filter(
-                Q(status='ATIVO', aprovado_para_uso=True)
-                | Q(locador=self.request.user)
-            )
+            return queryset.filter(visiveis)
+        if self.action == 'retrieve':
+            if usuario.is_authenticated:
+                return queryset.filter(visiveis | Q(locador=usuario))
+            return queryset.filter(visiveis)
+        if usuario.is_authenticated:
+            return queryset.filter(locador=usuario)
+        return queryset.none()
 
-        return queryset
+    def _quer_meus_itens(self) -> bool:
+        valor = self.request.query_params.get('meus', '').lower()
+        return self.request.user.is_authenticated and valor in ('true', '1')
 
     @action(detail=False, methods=['get'], url_path='proximos')
     def proximos(self, request):
@@ -209,6 +217,11 @@ class AvaliacaoViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     http_method_names = ['get', 'post', 'delete', 'head', 'options']
 
+    campo_dono = 'avaliador'
+
+    def get_permissions(self):
+        return [permissions.IsAuthenticatedOrReadOnly(), EhDonoOuSomenteLeitura()]
+
     def get_queryset(self):
         """
         Retorna avaliações, opcionalmente filtradas por item.
@@ -224,3 +237,8 @@ class AvaliacaoViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(item_id=item_id)
 
         return queryset
+
+    def perform_destroy(self, instance):
+        item = instance.item
+        super().perform_destroy(instance)
+        item.recalcular_avaliacoes()

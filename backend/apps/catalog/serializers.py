@@ -53,6 +53,12 @@ class FotoItemSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at']
 
+    def validate_item(self, item: Item) -> Item:
+        """Só o dono do item pode adicionar fotos a ele."""
+        if item.locador_id != self.context['request'].user.id:
+            raise serializers.ValidationError('Você só pode adicionar fotos aos seus itens.')
+        return item
+
 
 class ItemListSerializer(GeoFeatureModelSerializer):
     """
@@ -173,8 +179,13 @@ class ItemCreateUpdateSerializer(serializers.ModelSerializer):
     O locador é automaticamente vinculado ao usuário autenticado.
     """
 
-    latitude = serializers.FloatField(write_only=True, required=True)
-    longitude = serializers.FloatField(write_only=True, required=True)
+    latitude = serializers.FloatField(write_only=True, required=True, min_value=-90, max_value=90)
+    longitude = serializers.FloatField(write_only=True, required=True, min_value=-180, max_value=180)
+    # O dono controla a publicação: nasce ATIVO (itens PRO ainda dependem de aprovação do admin).
+    status = serializers.ChoiceField(
+        choices=[('RASCUNHO', 'Rascunho'), ('ATIVO', 'Ativo'), ('PAUSADO', 'Pausado')],
+        default='ATIVO',
+    )
 
     class Meta:
         model = Item
@@ -183,6 +194,7 @@ class ItemCreateUpdateSerializer(serializers.ModelSerializer):
             'titulo',
             'descricao',
             'categoria',
+            'status',
             'camada',
             'preco_diaria',
             'valor_caucao',
@@ -256,7 +268,8 @@ class AvaliacaoSerializer(serializers.ModelSerializer):
             'comentario',
             'created_at',
         ]
-        read_only_fields = ['id', 'avaliador', 'avaliador_nome', 'created_at']
+        # O item vem da própria locação: não dá para avaliar um item que não foi alugado.
+        read_only_fields = ['id', 'item', 'avaliador', 'avaliador_nome', 'created_at']
 
     def validate_nota(self, value: int) -> int:
         """Valida que a nota está entre 1 e 5."""
@@ -266,7 +279,21 @@ class AvaliacaoSerializer(serializers.ModelSerializer):
             )
         return value
 
+    def validate_locacao(self, locacao):
+        """Só o locatário avalia, e só depois que a locação foi concluída."""
+        usuario = self.context['request'].user
+        if locacao.locatario_id != usuario.id:
+            raise serializers.ValidationError('Só o locatário pode avaliar esta locação.')
+        if locacao.status != 'CONCLUIDO':
+            raise serializers.ValidationError('Só é possível avaliar locações concluídas.')
+        if Avaliacao.objects.filter(locacao=locacao).exists():
+            raise serializers.ValidationError('Esta locação já foi avaliada.')
+        return locacao
+
     def create(self, validated_data: dict) -> Avaliacao:
-        """Cria avaliação vinculada ao usuário autenticado."""
+        """Cria avaliação vinculada ao usuário autenticado e atualiza a média do item."""
         validated_data['avaliador'] = self.context['request'].user
-        return super().create(validated_data)
+        validated_data['item'] = validated_data['locacao'].item
+        avaliacao = super().create(validated_data)
+        avaliacao.item.recalcular_avaliacoes()
+        return avaliacao

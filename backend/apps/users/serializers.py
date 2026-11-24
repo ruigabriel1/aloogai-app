@@ -42,6 +42,19 @@ class UsuarioRegistroSerializer(serializers.ModelSerializer):
             'foto_perfil',
         ]
         read_only_fields = ['id']
+        extra_kwargs = {
+            # O app usa o e-mail como login; o username vira o e-mail quando não é enviado.
+            'username': {'required': False},
+            'email': {'required': True, 'allow_blank': False},
+            'first_name': {'required': True, 'allow_blank': False},
+        }
+
+    def validate_email(self, value: str) -> str:
+        """E-mail é o login do app: precisa ser único (sem diferenciar maiúsculas)."""
+        value = value.strip().lower()
+        if Usuario.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError('Já existe uma conta com este e-mail.')
+        return value
 
     def validate_cpf_cnpj(self, value: str) -> str:
         """
@@ -71,14 +84,21 @@ class UsuarioRegistroSerializer(serializers.ModelSerializer):
                 'CPF deve ter 11 dígitos e CNPJ deve ter 14 dígitos.'
             )
 
-        return value
+        # Grava só os dígitos: assim "123.456.789-00" e "12345678900" não viram duas contas.
+        if Usuario.objects.filter(cpf_cnpj=numeros).exists():
+            raise serializers.ValidationError('Já existe uma conta com este CPF/CNPJ.')
+        return numeros
 
     def validate(self, attrs: dict) -> dict:
-        """Valida que as senhas coincidem."""
+        """Valida que as senhas coincidem e define o username a partir do e-mail."""
         if attrs['password'] != attrs.pop('password_confirm'):
             raise serializers.ValidationError(
                 {'password_confirm': 'As senhas não coincidem.'}
             )
+        if not attrs.get('username'):
+            attrs['username'] = attrs['email']
+        if Usuario.objects.filter(username__iexact=attrs['username']).exists():
+            raise serializers.ValidationError({'username': 'Este nome de usuário já está em uso.'})
         return attrs
 
     def create(self, validated_data: dict) -> Usuario:
@@ -119,9 +139,12 @@ class UsuarioPerfilSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
+        # email e tipo_usuario não mudam pelo perfil: trocar exigiria verificação.
         read_only_fields = [
             'id',
             'username',
+            'email',
+            'tipo_usuario',
             'cpf_cnpj',
             'kyc_status',
             'score_esg',

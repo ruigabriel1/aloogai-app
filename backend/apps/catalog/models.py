@@ -179,10 +179,27 @@ class Item(models.Model):
         NÃO aparecem no mapa até aprovado_para_uso=True ser setado
         manualmente por um admin.
         """
-        if self.camada == 'PRO' and not self.pk:
-            self.aprovado_para_uso = False
-            self.requer_licenca = True
+        # O id é UUID com default, então `self.pk` já existe antes do primeiro save:
+        # usar `_state.adding`. Trocar a camada para PRO depois também exige aprovação.
+        if self.camada == 'PRO':
+            virou_pro = self._state.adding or (
+                Item.objects.filter(pk=self.pk)
+                .exclude(camada='PRO')
+                .exists()
+            )
+            if virou_pro:
+                self.aprovado_para_uso = False
+                self.requer_licenca = True
         super().save(*args, **kwargs)
+
+    def recalcular_avaliacoes(self) -> None:
+        """Atualiza a média e o total de avaliações a partir da tabela de avaliações."""
+        from django.db.models import Avg, Count
+
+        agregado = self.avaliacoes.aggregate(media=Avg('nota'), total=Count('id'))
+        self.avaliacao_media = round(agregado['media'] or 0.0, 2)
+        self.total_avaliacoes = agregado['total']
+        super().save(update_fields=['avaliacao_media', 'total_avaliacoes', 'updated_at'])
 
     @property
     def visivel_no_mapa(self) -> bool:

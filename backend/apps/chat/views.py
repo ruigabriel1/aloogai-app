@@ -139,6 +139,11 @@ class MensagemViewSet(
         from django.utils import timezone
 
         usuario = request.user
+        sala = SalaChat.objects.filter(id=sala_id).first()
+        if sala is None or not sala.usuario_pertence(usuario):
+            from rest_framework.exceptions import NotFound
+            raise NotFound("Sala de chat não encontrada.")
+
         mensagens_atualizadas = Mensagem.objects.filter(
             sala_id=sala_id,
             lida_em__isnull=True,
