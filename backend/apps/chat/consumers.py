@@ -48,7 +48,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 "locação %s",
                 self.locacao_id,
             )
-            await self.close(code=4001)
+            await self._recusar(4001)
             return
 
         # Verificar se o usuário pertence à sala e se o chat é permitido
@@ -58,7 +58,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 "Sala de chat não encontrada para locação %s",
                 self.locacao_id,
             )
-            await self.close(code=4004)
+            await self._recusar(4004)
             return
 
         if not await self._verificar_acesso(sala):
@@ -67,7 +67,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 self.user.id,
                 self.locacao_id,
             )
-            await self.close(code=4003)
+            await self._recusar(4003)
             return
 
         self.sala_id = str(sala.id)
@@ -85,6 +85,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
             self.user.id,
             self.sala_id,
         )
+
+    async def _recusar(self, codigo):
+        """
+        Aceita e fecha logo em seguida com o código (4001 sem login, 4003 sem acesso,
+        4004 sala inexistente). Fechar antes de aceitar vira um HTTP 403 no handshake,
+        e o app não teria como saber que não adianta tentar de novo.
+        """
+        await self.accept()
+        await self.close(code=codigo)
 
     async def disconnect(self, close_code):
         """

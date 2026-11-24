@@ -27,9 +27,10 @@ class ChatConsumerTests(TransactionTestCase):
     async def test_sem_token_a_conexao_e_recusada(self):
         locacao = await sync_to_async(LocacaoFactory)()
         comunicador = _conectar(locacao.id)
-        conectado, codigo = await comunicador.connect()
-        self.assertFalse(conectado)
-        self.assertEqual(codigo, 4001)
+        conectado, _ = await comunicador.connect()
+        self.assertTrue(conectado)  # aceita para poder informar o motivo...
+        fechamento = await comunicador.receive_output(timeout=5)
+        self.assertEqual(fechamento, {"type": "websocket.close", "code": 4001})  # ...e fecha com 4001
 
     async def test_mensagem_chega_aos_dois_participantes_no_formato_da_api(self):
         locacao = await sync_to_async(LocacaoFactory)()
